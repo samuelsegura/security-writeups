@@ -1,0 +1,27 @@
+================================
+LAB: 
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 
+Lab URL: 
+Category: 
+Level: 
+Objective: 
+Description: 
+
+[RECONNAISSANCE]
+----------------
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+[EXPLOITATION]
+--------------
+
+[EVIDENCE]
+----------
+
+[LESSONS LEARNED]
+-----------------

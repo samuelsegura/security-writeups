@@ -1,0 +1,147 @@
+================================
+LAB: Username enumeration via response timing
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 14, 2026
+Lab URL: https://0a5f00b3045295a080188a6a00b8004c.web-security-academy.net
+Category: Authentication Vulnerabilities
+Level: Practitioner
+Objective: Enumerate a valid username via response timing, brute-force the password, and access the account page
+Description: This lab implements a vulnerable authentication mechanism that exposes username enumeration through timing side-channel attacks. The application also features IP-based rate limiting that can be bypassed through HTTP header manipulation.
+
+[RECONNAISSANCE]
+----------------
+Initial exploration revealed a standard login form at /login with POST method authentication. Testing with provided credentials (wiener:peter) confirmed the authentication mechanism:
+- Successful login: HTTP 302 redirect to /my-account
+- Failed login: HTTP 200 with error message
+
+Key observations from intercepted request:
+- Endpoint: POST /login
+- Parameters: username and password (application/x-www-form-urlencoded)
+- No IP forwarding headers present by default
+- Session cookie maintained across requests
+
+Rate limiting testing:
+- Multiple rapid login attempts triggered IP-based blocking
+- Server implements brute-force protection based on source IP
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Two critical vulnerabilities were identified:
+
+1. **Insecure IP-Based Rate Limiting**
+The application trusts client-supplied X-Forwarded-For headers for rate limiting decisions. Testing revealed:
+- Adding arbitrary X-Forwarded-For headers bypasses IP blocking
+- No validation of proxy authenticity
+- Each unique X-Forwarded-For value treated as separate client
+
+Verification method:
+- Triggered rate limiting with multiple rapid requests
+- Added X-Forwarded-For: 1.1.1.1 header
+- Successfully bypassed blocking by incrementing IP values
+
+2. **Timing Side-Channel in Authentication**
+The authentication logic exhibits measurable timing differences based on username validity:
+
+Username INVALID flow:
+- Server checks username existence → not found
+- Authentication rejected immediately
+- Password verification skipped
+- Response time: ~200ms
+
+Username VALID flow:
+- Server checks username existence → found
+- Password hash verification performed (even if password wrong)
+- Cryptographic operation takes measurable time
+- Response time: ~500ms with long password
+
+This timing difference amplifies when using intentionally long passwords (~100 characters), as the cryptographic hashing operation becomes the dominant factor in response time.
+
+Manual validation tests:
+- wiener (valid) + 100-char password → 500ms
+- invaliduser + 100-char password → 200ms
+- Delta: ~300ms (highly exploitable)
+
+[EXPLOITATION]
+--------------
+**Phase 1: Username Enumeration**
+
+Burp Intruder configuration:
+- Attack type: Pitchfork
+- Position 1: X-Forwarded-For header (Numbers 1-101)
+- Position 2: username parameter (Simple list from candidate usernames)
+- Constant: password=aaaaaaaaaa...(100 characters)
+- Resource pool: Maximum concurrent requests = 1 (critical for accurate timing)
+
+Request template:
+```
+POST /login HTTP/2
+Host: 0a5f00b3045295a080188a6a00b8004c.web-security-academy.net
+X-Forwarded-For: §1§
+Cookie: session=kEEsqNc4gOv9ETG1H3TDnC0GQfYA1w8J
+Content-Type: application/x-www-form-urlencoded
+
+username=§2§&password=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+Results analysis:
+- Most usernames: 200-400ms response time
+- Username "acceso": 680ms response time
+- Outlier clearly identified as valid username
+
+**Phase 2: Password Brute-Force**
+
+Burp Intruder configuration:
+- Attack type: Pitchfork
+- Position 1: X-Forwarded-For header (Numbers 1-N, where N = password list length)
+- Position 2: password parameter (Simple list from candidate passwords)
+- Constant: username=acceso
+- Resource pool: Maximum concurrent requests = 1
+
+Request template:
+```
+POST /login HTTP/2
+Host: 0a5f00b3045295a080188a6a00b8004c.web-security-academy.net
+X-Forwarded-For: §1§
+Cookie: session=kEEsqNc4gOv9ETG1H3TDnC0GQfYA1w8J
+Content-Type: application/x-www-form-urlencoded
+
+username=acceso&password=§2§
+```
+
+Success indicator:
+- HTTP 302 response (redirect to /my-account)
+- Valid credentials: acceso:ranger
+
+[EVIDENCE]
+----------
+- Valid username identified: acceso (680ms vs 200-400ms baseline)
+- Valid credentials: acceso:ranger
+- Successful authentication: HTTP 302 redirect
+- Account page access confirmed
+- Lab marked as solved
+
+[LESSONS LEARNED]
+-----------------
+**Technical Insights:**
+
+1. **Timing Attacks Fundamentals**
+   - Side-channel vulnerabilities exploit measurable differences in execution time
+   - Password length amplifies timing differences in cryptographic operations
+   - Single-threaded testing (concurrent requests = 1) critical for reliable measurements
+   - Statistical outliers indicate different code paths
+
+2. **Rate Limiting Bypass Techniques**
+   - X-Forwarded-For header manipulation effective against naive implementations
+   - Secure rate limiting should use TCP-layer IP, not application-layer headers
+   - Client-supplied headers should never be trusted without validation
+   - Proxy headers only valid from authenticated upstream proxies
+
+3. **Attack Methodology**
+   - Manual validation before automation confirms exploitability
+   - Simple approaches (long static password) often sufficient
+   - Pitchfork attack type efficient for paired payload testing
+   - Understanding the "why" behind timing differences critical for reliable exploitation
+

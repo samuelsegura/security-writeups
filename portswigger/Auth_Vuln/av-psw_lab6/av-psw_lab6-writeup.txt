@@ -1,0 +1,113 @@
+================================
+LAB: Broken brute-force protection, IP block
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 15, 2026
+Lab URL: https://0a9f00f5043ba5778045d53e00f600a3.web-security-academy.net
+Category: Authentication Vulnerabilities
+Level: Practitioner
+Objective: Brute-force the victim's password, then log in and access their account page
+Description: This lab is vulnerable due to a logic flaw in its password brute-force protection. The application implements IP-based rate limiting that can be bypassed through session manipulation.
+
+[RECONNAISSANCE]
+----------------
+1. Manual Testing:
+   - Tested login functionality with invalid credentials
+   - Observed error message after 3 failed attempts: "You have made too many incorrect login attempts. Please try again in 1 minute(s)."
+   - Identified IP blocking mechanism triggers after 3 consecutive failed login attempts
+   - Blocking duration: 1 minute
+
+2. Request Analysis:
+   - Intercepted POST request to /login endpoint
+   - Parameters: username, password
+   - HTTP/2 protocol
+   - Session cookie updated after each successful login
+
+3. Valid Credentials Available:
+   - Username: wiener
+   - Password: peter
+   - These credentials can be used to test authentication behavior
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Logic Flaw in Rate Limiting:
+
+The application's brute-force protection contains a critical logic flaw:
+- Failed login attempts increment a counter that triggers IP blocking at threshold 3
+- However, a SUCCESSFUL login resets this counter to zero
+- The counter is tied to the session/IP, not individual user accounts
+- This allows an attacker to alternate between failed attempts on the target account and successful logins with known credentials
+
+Attack Pattern Discovery:
+- Testing revealed that inserting a successful login (wiener:peter) between failed attempts on carlos prevents the IP block from triggering
+- The reset happens regardless of which account successfully authenticates
+
+[EXPLOITATION]
+--------------
+Strategy:
+Create an alternating pattern that stays below the rate limit threshold by periodically resetting the counter with valid credentials.
+
+Attack Pattern:
+```
+carlos:password1 (attempt 1)
+carlos:password2 (attempt 2)
+wiener:peter     (successful login → counter RESET)
+carlos:password3 (attempt 1 after reset)
+carlos:password4 (attempt 2 after reset)
+wiener:peter     (successful login → counter RESET)
+...continue pattern...
+```
+
+Implementation Method - Burp Intruder (Pitchfork):
+
+1. Wordlist Preparation:
+   - Generated two synchronized lists (usernames.txt and passwords_intruder.txt)
+   - Pattern: 2 carlos entries followed by 1 wiener entry
+   - Python script used to automate list generation
+
+2. Burp Intruder Configuration:
+   - Attack type: Pitchfork
+   - Payload positions: username=§username§&password=§password§
+   - Payload set 1: usernames.txt (carlos, carlos, wiener, carlos, carlos, wiener...)
+   - Payload set 2: passwords_intruder.txt (pwd1, pwd2, peter, pwd3, pwd4, peter...)
+   - Resource Pool: 1 concurrent request (critical for maintaining sequential order)
+
+3. Initial Reset:
+   - Added 3x wiener:peter entries at the beginning of both lists
+   - Ensured clean state before starting the attack
+   - Lab was relaunched to guarantee counter at zero
+
+4. Execution:
+   - Launched Intruder attack
+   - Monitored for HTTP 302 responses with carlos username
+   - Identified successful authentication when carlos redirected to /my-account
+
+[EVIDENCE]
+----------
+Successful Credentials Found:
+- Username: carlos
+- Password: moscow
+
+Attack Results:
+- Total requests: ~150 (100 passwords + 50 reset requests + initial resets)
+- No IP blocking triggered during entire attack
+- Final successful login: carlos:moscow returned HTTP 302 redirect to /my-account?id=carlos
+- Lab objective achieved: accessed carlos account page
+
+[LESSONS LEARNED]
+-----------------
+1. Logic Flaws vs Implementation Strength:
+   - Strong rate limiting mechanisms can be completely bypassed by logic flaws
+   - The protection was technically working (blocking after 3 attempts) but the reset condition was poorly designed
+
+2. Counter Reset Conditions:
+   - Any successful login should NOT reset the failed attempt counter for OTHER accounts
+   - Counters should be tied to specific username attempts, not just session/IP
+
+3. Attack Automation Considerations:
+   - Sequential request execution is critical when exploiting timing-based bypasses
+   - Burp's concurrent request setting must be properly configured (set to 1)
+   - Initial state reset is important when dealing with stateful protections
+

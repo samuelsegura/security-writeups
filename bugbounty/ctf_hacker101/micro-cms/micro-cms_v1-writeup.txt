@@ -1,0 +1,186 @@
+================================
+LAB: Hacker101 CTF - Micro-CMS v1
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 29, 2026
+Lab URL: https://07ddbba7fc8cf7acfb0a3a0258d91c5a.ctf.hacker101.com/
+Category: Web Application Security
+Level: Easy
+Objective: Find 4 flags by exploiting various web vulnerabilities
+Description: Micro-CMS v1 is a basic content management system vulnerable to multiple web attacks including XSS, IDOR, and SQL Injection.
+
+[RECONNAISSANCE]
+----------------
+
+Initial exploration revealed:
+- Homepage displays a list of pages with links to page/1 and page/2
+- Create functionality available at /page/create
+- Pages can be edited via /page/edit/X pattern
+- Application claims "Markdown is supported, but scripts are not"
+
+URL patterns discovered:
+- View page: /page/X
+- Edit page: /page/edit/X
+- Create page: /page/create
+
+Testing enumeration:
+- page/1 and page/2 exist and are accessible
+- page/3, page/4, page/6+ return 404 (Not Found)
+- page/5 returns 403 (Forbidden) - indicating the page exists but access is restricted
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+1. STORED XSS (Title Field)
+   - Discovered that the title field does not properly sanitize HTML/JavaScript
+   - Tested with <b>bold test</b> - HTML was rendered, not escaped
+   - XSS payload in title executes on the homepage listing
+
+2. IDOR (Insecure Direct Object Reference)
+   - page/5 returned 403 Forbidden when accessed directly
+   - Tested alternative endpoint /page/edit/5 - access granted!
+   - Access control implemented inconsistently between view and edit routes
+
+3. SQL INJECTION (URL Parameter)
+   - Noticed single quote in test title suggesting prior SQLi testing
+   - Tested /page/edit/2' - payload triggered SQL error/modification
+   - Database query vulnerable to injection via page ID parameter
+
+4. STORED XSS (Body Field via SVG)
+   - Application filters <script> tags but not other XSS vectors
+   - Event handlers (onload, onerror, etc.) not properly filtered
+   - SVG elements with JavaScript event handlers bypass filtering
+
+[EXPLOITATION]
+--------------
+
+FLAG 1 - Stored XSS in Title Field
+----------------------------------
+Payload: <script>alert('XSS')</script>
+Steps:
+1. Navigate to /page/edit/1
+2. Enter XSS payload in the title field: <script>alert('XSS')</script>
+3. Save the page
+4. Return to homepage (/)
+5. Flag displayed in popup alert
+
+Flag: ^FLAG^d649be654c34327b638372e40373768e64aaac3c98c1277004dbb0ecbffeb5f5$FLAG$
+
+FLAG 2 - IDOR (Insecure Direct Object Reference)
+------------------------------------------------
+Vulnerability: Access control bypass
+Steps:
+1. Discovered /page/5 returns 403 Forbidden
+2. Tested /page/edit/5 - access granted!
+3. Flag revealed in the edit page content
+
+Flag: ^FLAG^e082b910ff2d077199532a66f4ca2589e629a2cd564eb40b05102001d412de14$FLAG$
+
+FLAG 3 - SQL Injection Detection
+--------------------------------
+Payload: ' (single quote)
+Steps:
+1. Navigate to /page/edit/2'
+2. Appended single quote to page ID parameter
+3. SQL error triggered revealing flag
+
+Flag: ^FLAG^9abd23878c0a03bf4f30ac40ff9f88f5f04139832d6b4d92c6f4a5c844819fbc$FLAG$
+
+FLAG 4 - Stored XSS in Body Field (SVG)
+---------------------------------------
+Payload: <svg onload=alert(1)>
+Steps:
+1. Navigate to /page/create
+2. Enter title: "XSS Body Test"
+3. Enter body: <svg onload=alert(1)>
+4. Click "Create"
+5. Redirected to /page/12
+6. Flag appears in HTML attribute: <svg flag="^FLAG^..." onload=alert(1)>
+
+Flag: ^FLAG^697947a394c9053d3ebf5f9f0bed1edf19bf66c1c58e706bb472249bd768360e$FLAG$
+
+[EVIDENCE]
+----------
+
+Request/Response Examples:
+
+1. XSS Title Exploitation:
+   POST /page/edit/1
+   title=<script>alert('XSS')</script>&body=...
+
+2. IDOR Exploitation:
+   GET /page/edit/5 HTTP/2
+   Response: 200 OK with flag in content
+
+3. SQL Injection:
+   GET /page/edit/2' HTTP/2
+   Response: Flag displayed
+
+4. XSS Body via SVG:
+   POST /page/create
+   title=test+2&body=<svg onload=alert(1)>
+
+   Response HTML:
+   <p><svg flag="^FLAG^697947a394c9053d3ebf5f9f0bed1edf19bf66c1c58e706bb472249bd768360e$FLAG$" onload=alert(1)></p>
+
+[LESSONS LEARNED]
+-----------------
+
+Key Takeaways:
+
+1. Always test ALL input contexts
+   - Testing XSS in the title field is not enough
+   - Body field, URL parameters, and other inputs must be tested separately
+   - Different contexts may have different filtering rules
+
+2. Bypass techniques for XSS filters
+   - When <script> is blocked, try alternative vectors:
+     * <svg onload=...>
+     * <img src=x onerror=...>
+     * <body onload=...>
+     * <iframe src=javascript:...>
+   - Event handlers are often overlooked by naive filters
+
+3. IDOR requires testing all endpoints
+   - Access control on /page/5 doesn't mean /page/edit/5 is protected
+   - Always test: view, edit, delete, update operations
+   - Inconsistent authorization is a common logic flaw
+
+4. SQL Injection detection
+   - Simple payloads like a single quote (') can reveal vulnerabilities
+   - Always test URL parameters that appear to be database IDs
+   - Manual testing can be more effective than automated tools for understanding behavior
+
+5. Methodology matters
+   - Systematic enumeration (testing page/1, 2, 3, 4, 5...) reveals hidden resources
+   - 403 Forbidden is different from 404 Not Found - investigate further
+   - Read application messages carefully - "scripts not supported" may be incomplete protection
+
+Security Recommendations:
+
+1. Output Encoding
+   - Encode all user input before rendering in HTML
+   - Convert < to &lt;, > to &gt;, etc.
+   - Use context-aware encoding (HTML, JavaScript, URL)
+
+2. Input Validation
+   - Whitelist allowed HTML tags for Markdown
+   - Strip ALL event handlers (onload, onerror, onclick, etc.)
+   - Use established sanitization libraries (DOMPurify, Bleach)
+
+3. Access Control
+   - Implement consistent authorization checks across ALL endpoints
+   - Don't rely on obscurity (hidden page IDs)
+   - Validate permissions on EVERY request, not just read operations
+
+4. SQL Injection Prevention
+   - Use parameterized queries/prepared statements
+   - Never concatenate user input directly into SQL queries
+   - Implement proper error handling (don't expose SQL errors)
+
+5. Defense in Depth
+   - Content Security Policy (CSP) headers to prevent inline JavaScript
+   - HTTPOnly cookies to prevent XSS cookie theft
+   - Regular security testing and code reviews

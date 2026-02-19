@@ -1,0 +1,68 @@
+================================
+LAB: Path Traversal – Absolute Path & Non-Recursive Filtering
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-01-22
+Lab URL: 
+ - https://portswigger.net/web-security/file-path-traversal/lab-absolute-path-bypass
+ - https://portswigger.net/web-security/file-path-traversal/lab-sequences-stripped-non-recursively
+Category: File Path Traversal
+Level: Apprentice
+Objective: Retrieve the contents of /etc/passwd on both lab instances.
+Description: These two PortSwigger labs demonstrate different flawed defenses against file path traversal: one that blocks traversal sequences but still accepts absolute paths, and another that strips traversal sequences non-recursively, allowing crafted payloads to bypass the filter.[web:3][web:13]
+
+[RECONNAISSANCE]
+----------------
+- Identified the image loading endpoint: GET /image?filename=<name>, used to render product images.
+- Confirmed that the parameter filename is directly reflected in how the server locates files on disk by observing differences between valid image names and invalid ones.
+- Tested basic traversal payloads such as ../../../../etc/passwd to check for direct traversal and to understand how the server handles traversal sequences.[web:4][web:15]
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Lab 1 – Traversal sequences blocked with absolute path bypass:
+- Sending ../ based payloads such as ../../../../etc/passwd resulted in errors or blocked responses, indicating some server-side filtering of traversal sequences.
+- Testing a direct absolute path /etc/passwd via /image?filename=/etc/passwd returned a valid response instead of an error, indicating that absolute paths are allowed while only relative traversal sequences are blocked.
+- This showed that the server assumes the user-supplied filename is relative to a working directory, but does not restrict or sanitize absolute paths starting with /, resulting in a path traversal vulnerability.[web:3][web:8]
+
+Lab 2 – Traversal sequences stripped non-recursively:
+- Basic relative payloads like ../../../../etc/passwd were rejected with responses such as "No such file", suggesting the server attempts to strip or normalize traversal sequences before using the path.
+- From the lab description and behaviour, it appeared the application strips ../ sequences but does so only once, non-recursively, which can be abused if traversal sequences are embedded in a larger pattern.
+- By testing patterns such as ....// and repeating them, it became clear that the filter only removes the inner ../ part, leaving behind a valid ../ sequence after the first pass of sanitization.[web:13][web:14][web:18]
+
+[EXPLOITATION]
+--------------
+Lab 1 – Absolute path bypass:
+- Crafted a request using an absolute path instead of a relative traversal chain:
+  - GET /image?filename=/etc/passwd HTTP/2
+- The server treated /etc/passwd as a valid absolute path on the filesystem, bypassing the filter that only targeted ../ sequences in relative paths.
+- The response body contained typical /etc/passwd entries (root, www-data, system users), confirming successful arbitrary file read from the server filesystem.[web:3][web:11]
+
+Lab 2 – Traversal sequences stripped non-recursively:
+- To exploit the non-recursive stripping, used a payload that contains nested traversal patterns: ....// which decomposes to .. + ../ + /.
+- When the filter removes the inner ../ only once, each ....// sequence effectively becomes ../ in the final path.
+- Constructed the final payload: GET /image?filename=....//....//....//....//etc/passwd
+- After sanitization on the server, this payload resolves to ../../../../etc/passwd, allowing traversal from the images directory to the filesystem root and then to /etc/passwd.[web:13][web:14][web:19]
+
+[EVIDENCE]
+----------
+Lab 1 – /image?filename=/etc/passwd:
+- Response (excerpt):
+  - root:x:0:0:root:/root:/bin/bash
+  - www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+  - user:x:12000:12000::/home/user:/bin/bash
+- These entries are consistent with a typical Linux /etc/passwd file, confirming that the application reads arbitrary system files using attacker-controlled paths.[web:3]
+
+Lab 2 – /image?filename=....//....//....//....//etc/passwd:
+- Response (excerpt):
+  - root:x:0:0:root:/root:/bin/bash
+  - www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+  - user:x:12000:12000::/home/user:/bin/bash
+- The content matches /etc/passwd, demonstrating that the one-pass, non-recursive stripping of ../ can be bypassed using crafted nested traversal sequences.[web:13][web:18]
+
+[LESSONS LEARNED]
+-----------------
+- Blocking only ../ sequences or applying non-recursive string replacements is an ineffective defense against file path traversal; attackers can often bypass such filters using absolute paths or obfuscated traversal patterns.[web:4][web:21]
+- Robust mitigation requires strict allowlisting of file identifiers, mapping user-controlled values to fixed server-side paths rather than passing user input directly into filesystem operations.
+- Additional hardening includes normalizing paths with secure APIs, verifying that the resolved path stays within an allowed directory, and disallowing any user-supplied absolute paths or directory separators.[web:15][web:11]

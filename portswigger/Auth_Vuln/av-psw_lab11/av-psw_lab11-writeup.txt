@@ -1,0 +1,131 @@
+================================
+LAB: Password brute-force via password change
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 21, 2026
+Lab URL: https://0acf009d04ec98f0808e2bf300740061.web-security-academy.net
+Category: Authentication Vulnerabilities
+Level: Practitioner
+Objective: Use the list of candidate passwords to brute-force Carlos's account and access his "My account" page
+Description: This lab's password change functionality makes it vulnerable to brute-force attacks due to logic flaws in the validation process.
+
+[RECONNAISSANCE]
+----------------
+
+Initial credentials provided:
+- Own account: wiener:peter
+- Target account: carlos (password unknown)
+- Candidate password list: PortSwigger authentication lab passwords
+
+Key endpoint identified: POST /my-account/change-password
+
+Request structure:
+username=wiener&current-password=peter&new-password-1=test&new-password-2=test
+
+Initial observations:
+- Four parameters: username, current-password, new-password-1, new-password-2
+- No apparent session validation linking the authenticated user to the username parameter
+- Rate limiting exists on /login endpoint (1 minute timeout after multiple failed attempts)
+- No rate limiting detected on /my-account/change-password endpoint
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+Logic Flaw #1: Missing Authorization Check
+The application does not verify that the authenticated session user matches the username parameter in the password change request. 
+This allows an authenticated user (wiener) to attempt password changes for other users (carlos).
+
+Logic Flaw #2: Information Disclosure via Error Messages
+Manual testing revealed different application behaviors based on validation order:
+
+Test with wiener (known password: peter):
+1. Valid current-password + matching new passwords → 200 OK "Password changed successfully"
+2. Valid current-password + non-matching new passwords → 200 OK "New passwords do not match"
+3. Invalid current-password + non-matching new passwords → 200 OK "Current password is incorrect"
+
+Validation order discovered:
+1. Check if current-password is correct
+2. Check if new-password-1 == new-password-2
+3. Change password if both checks pass
+
+Oracle identified:
+- "Current password is incorrect" → Invalid current-password
+- "New passwords do not match" → VALID current-password but confirmation fails
+
+This creates a password validation oracle that can be exploited via brute-force without triggering rate limiting on the login endpoint.
+
+[EXPLOITATION]
+--------------
+
+Attack strategy:
+Brute-force the current-password parameter for username=carlos while intentionally creating a password mismatch (new-password-1 ≠ new-password-2). 
+The application will reveal when the correct current-password is found via the distinct error message.
+
+Burp Suite Intruder configuration:
+- Attack type: Sniper
+- Target endpoint: POST /my-account/change-password
+- Payload position: current-password value
+- Payload set: PortSwigger candidate password list
+
+Request template:
+username=carlos&current-password=§PAYLOAD§&new-password-1=test&new-password-2=different
+
+Grep - Match configuration:
+- Search for: "New passwords do not match" (indicates valid current-password)
+- Baseline: "Current password is incorrect" (indicates invalid current-password)
+
+Attack execution:
+1. Sent request to Burp Intruder
+2. Configured payload position on current-password parameter
+3. Loaded candidate password list
+4. Configured Grep - Match to identify successful current-password validation
+5. Launched attack
+6. Identified password "12345" via "New passwords do not match" response
+
+Final access:
+- Logged out from wiener session
+- Logged in with carlos:12345
+- Successfully accessed carlos's "My account" page
+- Lab solved
+
+[EVIDENCE]
+----------
+
+Successful password identification:
+Request:
+username=carlos&current-password=12345&new-password-1=test&new-password-2=different
+
+Response: 200 OK
+<p class=is-warning>New passwords do not match</p>
+<div id=account-content>
+    <p>Your username is: carlos</p>
+
+Confirmed credentials: carlos:12345
+
+[LESSONS LEARNED]
+-----------------
+
+1. Defense in Depth Failure
+Implementing rate limiting on /login is insufficient if other endpoints (like /my-account/change-password) can validate credentials without similar protections. 
+All authentication-related endpoints must have consistent security controls.
+
+2. Validation Order Matters
+The order of validation checks can create information disclosure vulnerabilities. The application should fail with generic error messages regardless of which validation step fails.
+
+3. Authorization vs Authentication
+Authentication (verifying who you are) is not the same as authorization (verifying what you can do). 
+The application authenticated wiener but failed to authorize whether wiener should be able to change carlos's password.
+
+4. Error Message Standardization
+Different error messages for different failure modes create password oracles. 
+A generic "Password change failed" message would prevent this information leakage.
+
+5. Logic Flaw Exploitation
+This vulnerability required no technical exploits or code injection. 
+It exploited the application's intended functionality with unexpected input combinations, highlighting the importance of threat modeling during development.
+
+6. Manual Analysis First
+Automated tools would not easily discover this vulnerability. 
+Manual testing with different parameter combinations revealed the logic flaw that enabled the attack.

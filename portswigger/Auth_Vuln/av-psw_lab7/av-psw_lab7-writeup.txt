@@ -1,0 +1,108 @@
+================================
+LAB: Brute-forcing a stay-logged-in cookie
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 16, 2026
+Lab URL: https://0a6b00f40381399d8863a6ee001d00b8.web-security-academy.net
+Category: Authentication Vulnerabilities
+Level: Apprentice
+Objective: Brute-force Carlos's cookie to gain access to his "My account" page
+Description: This lab allows users to stay logged in even after they close their browser session. The cookie used to provide this functionality is vulnerable to brute-forcing. 
+             Given credentials for wiener:peter and a candidate password list, the goal is to compromise carlos's account.
+
+[RECONNAISSANCE]
+----------------
+After logging in as wiener with the "stay-logged-in" option enabled, intercepted the authenticated request to /my-account using Burp Suite. 
+Observed a persistent cookie named "stay-logged-in" with the following value:
+
+stay-logged-in=d2llbmVyOjUxZGMzMGRkYzQ3M2Q0M2E2MDExZTllYmJhNmNhNzcw
+
+Decoded the base64 value to reveal the cookie structure:
+wiener:51dc30ddc473d43a6011e9ebba6ca770
+
+Format identified: username:hash_value
+
+Analyzed the hash component (51dc30ddc473d43a6011e9ebba6ca770):
+- Length: 32 hexadecimal characters
+- Type: MD5 hash (128 bits)
+- Verified it corresponds to MD5(peter)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+The stay-logged-in cookie mechanism is vulnerable due to:
+
+1. Predictable Structure: Simple concatenation of username and password hash encoded in base64
+2. Weak Hashing: MD5 algorithm without salt allows offline brute-forcing
+3. No Server Secret: Cookie can be forged without any server-side cryptographic key
+4. No Rate Limiting: Unlimited cookie validation attempts are allowed
+5. Blind Trust: Server accepts any properly formatted cookie without verifying its origin
+
+The server validates cookies by:
+- Decoding base64 to extract username and hash
+- Querying database for the user's password
+- Computing MD5 of stored password
+- Comparing received hash with computed hash
+
+The server never checks who created the cookie or when, treating it like a physical key - whoever possesses a valid cookie gains access.
+
+An attacker can forge valid cookies by constructing base64(username:md5(password)) for each candidate password until finding the correct one.
+
+[EXPLOITATION]
+--------------
+Used Burp Suite Intruder to automate the cookie brute-force attack:
+
+Step 1: Captured GET request to /my-account
+Step 2: Sent request to Intruder
+Step 3: Configured attack parameters:
+- Attack Type: Sniper
+- Payload Position: stay-logged-in cookie value only
+- Payload Type: Simple list
+- Remove session cookie
+
+Step 4: Configured Payload Processing rules (in order):
+1. Hash: MD5
+2. Add prefix: carlos:
+3. Encode: Base64
+
+This automatically transforms each password into the required cookie format.
+
+Step 5: Loaded PortSwigger candidate password list
+Step 6: Launched attack
+
+Step 7: Analyzed responses - most returned HTTP 302 (redirect to login), indicating invalid cookie. One response showed different behavior (200 status).
+
+Step 8: Identified successful payload decoded to: carlos:md5(1234)
+Password discovered: 1234
+
+Step 9: Manually verified by forging cookie with base64(carlos:md5(1234)) and accessing /my-account?id=carlos successfully.
+
+Lab solved.
+
+[EVIDENCE]
+----------
+- Successful cookie format reverse-engineered: base64(username:md5(password))
+- Carlos's password discovered: 1234
+- Valid cookie forged without legitimate login session
+- Full account access achieved to carlos's profile
+- Single anomalous HTTP response among hundreds of 302 redirects confirmed successful authentication
+- Lab marked as solved by PortSwigger platform
+
+[LESSONS LEARNED]
+-----------------
+Key Takeaways:
+
+1. Cookie Security: Authentication cookies must be cryptographically signed with server-side secrets (HMAC) to prevent forgery. Client-side data should never be blindly trusted.
+
+2. Hashing Best Practices: MD5 is cryptographically broken and unsuitable for password storage. Modern alternatives like bcrypt, scrypt, or argon2 with unique salts per user are required.
+
+3. Rate Limiting: Authentication mechanisms must implement rate limiting and account lockout to prevent brute-force attacks, even on cookie-based systems.
+
+4. Defense in Depth: Multiple layers of security (strong hashing, signatures, rate limiting, monitoring) prevent single point of failure exploitation.
+
+5. Attack Methodology: Always analyze cookie structure first - decode, identify patterns, verify with known credentials, 
+   then automate exploitation. Manual verification confirms understanding before scaling attacks.
+
+Real-world impact: This vulnerability allows complete account takeover without password knowledge. Attackers can scale this attack across entire user bases, harvest actual passwords, 
+                   and persist access via forged cookies. Organizations must implement secure session management to prevent authentication bypass.

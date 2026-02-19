@@ -1,0 +1,108 @@
+================================
+LAB: Username enumeration via subtly different responses
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 13, 2026
+Lab URL: https://0a3500d5047a542e82917afc00ac009f.web-security-academy.net
+Category: Authentication
+Level: Apprentice
+Objective: Enumerate a valid username, brute-force the user's password, then access their account page
+Description: This lab is subtly vulnerable to username enumeration and password brute-force attacks. It has an account with a predictable username and password from provided wordlists.
+
+[RECONNAISSANCE]
+----------------
+Initial Analysis:
+- Standard login form accepting username and password
+- POST request to /login endpoint
+- Content-Type: application/x-www-form-urlencoded
+- Parameters: username & password
+- Error message displayed: "Invalid username or password."
+
+Tools Used:
+- Burp Suite Professional
+- Burp Intruder for brute-forcing
+- PortSwigger provided wordlists (usernames and passwords)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+The application attempts to provide a generic error message for both invalid usernames and invalid passwords to prevent username enumeration. However, the implementation has a subtle flaw:
+
+- Invalid username → Response: "Invalid username or password." (with period)
+- Valid username with invalid password → Response: "Invalid username or password" (without period)
+
+This punctuation inconsistency reveals whether a username exists in the system. The difference is minimal (single character) but detectable through automated testing.
+
+Attack Vector:
+The vulnerability allows an attacker to:
+1. Enumerate valid usernames by observing subtle response differences
+2. Once a valid username is identified, brute-force the password
+3. Gain unauthorized access to user accounts
+
+[EXPLOITATION]
+--------------
+Phase 1: Username Enumeration
+
+Step 1: Captured a login request using Burp Proxy
+- Method: POST /login
+- Body: username=test&password=test
+
+Step 2: Sent request to Burp Intruder
+- Configured attack type: Sniper
+- Set payload position on username parameter only
+- Loaded username wordlist from PortSwigger
+
+Step 3: Executed brute-force attack
+- Analyzed responses visually
+- Identified anomaly: username "ftp" returned error message without trailing period
+- All other usernames returned message WITH period
+
+Result: Valid username identified → ftp
+
+Phase 2: Password Brute-Force
+
+Step 1: Modified Intruder configuration
+- Fixed username parameter to "ftp"
+- Changed payload position to password parameter
+- Loaded password wordlist from PortSwigger
+
+Step 2: Executed password brute-force
+- Monitored HTTP status codes in responses
+- Identified single response with status code 302 (redirect)
+- All other responses returned status code 200
+
+Result: Valid password identified → letmein
+
+Step 3: Account Access
+- Logged in with credentials ftp:letmein
+- Successfully accessed user account page
+- Lab marked as solved
+
+[EVIDENCE]
+----------
+Valid Credentials:
+- Username: ftp
+- Password: letmein
+
+Final Working Request:
+POST /login HTTP/2
+Host: 0a3500d5047a542e82917afc00ac009f.web-security-academy.net
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 29
+
+username=ftp&password=letmein
+
+Response Characteristics:
+- Invalid username: HTTP 200, error message "Invalid username or password."
+- Valid username, invalid password: HTTP 200, error message "Invalid username or password"
+- Valid credentials: HTTP 302, redirect to /my-account
+
+[LESSONS LEARNED]
+-----------------
+Technical Takeaways:
+1. Subtle differences matter - even a single character (punctuation) can leak sensitive information
+2. Developers may attempt to implement security through identical error messages, but implementation flaws can undermine this
+3. Visual inspection of brute-force results can be effective before using advanced features like Grep-Extract
+4. HTTP status codes (302 redirect) are reliable indicators of successful authentication
+

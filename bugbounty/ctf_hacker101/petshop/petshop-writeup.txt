@@ -1,0 +1,64 @@
+================================
+LAB: Hacker101 CTF - Petshop Pro
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 31, 2026
+Lab URL: https://653e3c44b34a733e9e59408313ab582f.ctf.hacker101.com/
+Category: Web Application Security
+Level: Beginner CTF
+Objective: Find and exploit 3 flags in Petshop Pro e-commerce app
+Description: Simple pet photo shop with cart/checkout functionality. Admin panel hidden. Flags hidden in price manipulation, admin login, and XSS.
+
+[RECONNAISSANCE]
+----------------
+- Discovered endpoints: /, /cart, /checkout, /add/{id}, /login via manual navigation and directory fuzzing (feroxbuster).
+- HTML inspection revealed products ID 0 (Kitten) and ID 1 (Puppy).
+- Session cookie format: JSON base64-encoded {"cart":[], "modified":true} with HMAC.
+- Admin features hidden behind authentication.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Flag 0: Client-side price control in cart hidden input. POST /checkout accepts tampered cart JSON.
+Flag 1: Login form /login with username enumeration (diff response: "Invalid username" vs "Invalid password"). No rate limit but sensitive to speed.
+Flag 2: Admin home exposes flag in HTML after login.
+Flag 3: Authenticated /edit?id={id} form reflects user input (name/desc/price) on home/cart without sanitization → Stored XSS.
+
+[EXPLOITATION]
+--------------
+Flag 0:
+1. GET /add/0 → /cart
+2. Tamper POST /checkout: cart=[[0, {"name":"Kitten","desc":"...","logo":"kitten.jpg","price":0}]]
+3. Response contains ^FLAG^aadefe3a109d302d34e0a7d2b72310c57ecd7c5fe20cfce9126598652af55bae$FLAG$
+
+Flag 1:
+1. Burp Intruder Sniper on /login POST "username=FUZZ&password=test".
+2. Grep Extract "Invalid username" + Negative Match → Enumerate username=rosaline.
+3. Phase 2: password=FUZZ → creation (response changes to 302).
+
+Flag 2:
+Login as admin → Home shows ^FLAG^5fa40bab64e85897bdb696bfed3975923b01d748d147b4144e6cfc8e9e57c572$FLAG$.
+
+Flag 3:
+1. Admin login → /edit?id=0.
+2. POST desc=<script>alert(1)</script> → Home/cart reflects unsanitized.
+3. Flag revealed in reflected content on /cart.
+
+[EVIDENCE]
+----------
+- Screenshots/HTTP requests logged in Burp Suite.
+- Flags:
+  0: aadefe3a109d302d34e0a7d2b72310c57ecd7c5fe20cfce9126598652af55bae
+  1: [Admin access confirmed]
+  2: 5fa40bab64e85897bdb696bfed3975923b01d748d147b4144e6cfc8e9e57c572
+  3: [XSS payload triggered flag reveal]
+
+[LESSONS LEARNED]
+-----------------
+- Always decode session cookies (base64 JSON + HMAC).
+- Burp Intruder negative matching essential for response diff (username enum).
+- Test hidden IDs (/add/2+) even if UI shows only 0/1.
+- Stored XSS in admin edit → Trigger in user-facing pages (/cart).
+- Client-side validation bypass via direct POST tampering.
+- Rate limiting evasion: Slow threads (1) + delays (1.5s).

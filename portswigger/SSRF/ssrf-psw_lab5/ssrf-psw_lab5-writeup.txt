@@ -1,0 +1,131 @@
+================================
+LAB: Blind SSRF with out-of-band detection
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 28, 2026
+Lab URL: https://0a2700430492149c83fefa3e004e0017.web-security-academy.net
+Category: Server-Side Request Forgery (SSRF)
+Level: Apprentice
+Objective: Use analytics software to cause an HTTP request to the public Burp Collaborator server
+Description: This site uses analytics software which fetches the URL specified in the Referer header when a product page is loaded. The lab requires exploiting this functionality to trigger an out-of-band interaction.
+
+[RECONNAISSANCE]
+----------------
+
+Initial Analysis:
+- Target endpoint: GET /product?productId=1
+- Vulnerable component: Analytics software processing Referer header
+- Attack surface: HTTP headers, specifically Referer header
+- Expected behavior: Backend fetches URL from Referer for analytics tracking
+
+Key observations:
+1. The application loads product pages with standard HTTP/2 requests
+2. The Referer header is present in requests and likely processed server-side
+3. No direct output is returned to the client (blind SSRF scenario)
+4. Lab explicitly mentions analytics software that "fetches the URL specified in the Referer header"
+
+Vector identification:
+- Entry point: Referer HTTP header
+- Processing: Server-side URL fetching mechanism
+- Detection method: Out-of-band (OOB) technique required due to blind nature
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+Vulnerability Type: Blind Server-Side Request Forgery (SSRF)
+
+The application contains a blind SSRF vulnerability in its analytics functionality. When a product page is loaded, the backend analytics software reads the Referer header value and makes an HTTP request to that URL without proper validation.
+
+Why this is blind SSRF:
+1. The server makes outbound requests based on user-controlled input (Referer header)
+2. No response or error message is returned to the client
+3. The only way to confirm the vulnerability is through out-of-band detection
+
+Attack vector analysis:
+- Input: Referer header value
+- Vulnerable code behavior: Backend fetches the URL for analytics purposes
+- Missing security control: No URL validation or whitelist restrictions on Referer processing
+- Impact: Server can be forced to make arbitrary HTTP requests
+
+[EXPLOITATION]
+--------------
+
+Step 1: Generate Burp Collaborator payload
+- Opened Burp Suite Professional
+- Navigated to: Burp menu → Burp Collaborator client
+- Clicked "Copy to clipboard" to generate unique domain
+- Generated domain: yxz09o3ik4u0rizeyf32a6vv4mady3ms.oastify.com
+
+Step 2: Craft the malicious request
+- Intercepted the product page request in Burp Proxy
+- Sent request to Repeater for manipulation
+- Modified the Referer header value
+
+Initial attempt (failed):
+```
+Referer: yxz09o3ik4u0rizeyf32a6vv4mady3ms.oastify.com
+```
+Result: No interaction detected - missing URL scheme
+
+Successful payload:
+```
+Referer: https://yxz09o3ik4u0rizeyf32a6vv4mady3ms.oastify.com/
+```
+
+Step 3: Execute the attack
+- Sent the modified request through Repeater
+- Returned to Burp Collaborator client
+- Clicked "Poll now" to check for interactions
+- Waited 5-10 seconds for backend processing
+
+[EVIDENCE]
+----------
+
+Successful SSRF confirmation via Burp Collaborator:
+- 2 DNS queries received (A record lookups for domain resolution)
+- 1 HTTP request received to the Collaborator domain
+
+Interaction details:
+- DNS queries: Server resolved the Collaborator domain before making HTTP request
+- HTTP request: Full HTTP connection initiated from vulnerable server
+- Source: Backend analytics server
+- Destination: Burp Collaborator public server
+
+Request flow:
+1. Client sends product request with malicious Referer header
+2. Backend analytics processes the Referer value
+3. Server performs DNS resolution for Collaborator domain (2 queries logged)
+4. Server initiates HTTP GET request to Collaborator domain (1 request logged)
+5. Collaborator logs interaction as proof of SSRF
+
+Lab status: SOLVED
+
+[LESSONS LEARNED]
+-----------------
+
+Technical takeaways:
+1. Referer header is commonly used by analytics tools and can be a SSRF vector
+2. Complete URL format (http:// or https://) is required to trigger HTTP requests
+3. Blind SSRF requires out-of-band detection since no response is visible in-app
+4. DNS queries often precede HTTP requests as part of normal resolution process
+
+Attack methodology:
+1. Identify user-controllable input that might trigger backend requests
+2. Use out-of-band tools (Burp Collaborator, Interactsh, netcat) for blind vulnerabilities
+3. Ensure payload format matches expected input (complete URLs with schemes)
+4. Monitor for both DNS and HTTP interactions
+
+Real-world implications:
+- Analytics software frequently processes Referer headers for tracking
+- SSRF can be exploited even without visible error messages or responses
+- Proper input validation and URL whitelisting are critical for defense
+- Out-of-band detection is essential for discovering blind vulnerabilities
+
+Defense mechanisms to prevent this:
+1. Validate and sanitize Referer header input
+2. Implement URL whitelist for allowed domains
+3. Disable or restrict server-side URL fetching for untrusted input
+4. Use network segmentation to limit SSRF impact
+5. Monitor outbound requests for suspicious patterns

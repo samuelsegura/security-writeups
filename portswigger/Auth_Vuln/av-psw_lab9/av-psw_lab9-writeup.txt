@@ -1,0 +1,123 @@
+================================
+LAB: Password reset broken logic
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 20, 2026
+Lab URL: https://0a2200a403fc850080cfe4a4007f00b4.web-security-academy.net
+Category: Authentication vulnerabilities
+Level: Apprentice
+Objective: Reset Carlos's password then log in and access his "My account" page
+Description: This lab's password reset functionality is vulnerable. To solve the lab, reset Carlos's password then log in and access his "My account" page. Credentials provided: wiener:peter. Victim's username: carlos.
+
+[RECONNAISSANCE]
+----------------
+1. Logged in with provided credentials (wiener:peter) to understand the application behavior
+2. Accessed the "Forgot password?" functionality to analyze the password reset flow
+3. Captured HTTP traffic using Burp Suite Proxy to examine the complete reset process
+
+Password reset flow observed:
+- Step 1: POST /forgot-password with username parameter
+  Body: username=wiener@exploit-0aef001203fb8510805fe31301b300b1.exploit-server.net
+
+- Step 2: Email received with reset link containing temp-forgot-password-token
+
+- Step 3: GET /forgot-password?temp-forgot-password-token=cderslo94qkhyvmib0y1jvqfbyiyb8pm
+  This displays the password reset form
+
+- Step 4: POST /forgot-password?temp-forgot-password-token=cderslo94qkhyvmib0y1jvqfbyiyb8pm
+  Body: temp-forgot-password-token=cderslo94qkhyvmib0y1jvqfbyiyb8pm&username=wiener&new-password-1=test&new-password-2=test
+
+Key observation: The final POST request contains both the token (in URL and body) AND the username parameter in the body. This username parameter is client-controlled.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Hypothesis: The server validates the reset token's existence and format but may not verify that the token belongs to the user specified in the username parameter.
+
+Analysis of the reset logic:
+- The token is validated when accessing the reset form (GET request)
+- When submitting the new password (POST request), the server appears to trust the client-provided 'username' parameter
+- There is no server-side verification that the token was issued for the specific username being submitted
+
+Vulnerability identified: Broken Authentication Logic - Insufficient Token-to-User Binding
+
+The application fails to validate that the reset token corresponds to the user account specified in the username parameter during password reset submission. This allows an attacker to use a valid token obtained for their own account to reset any other user's password by simply changing the username parameter.
+
+Root cause: The backend does not maintain or verify the relationship between reset tokens and user accounts during the password change operation.
+
+[EXPLOITATION]
+--------------
+Attack process:
+1. Initiated password reset for my own account (wiener) through the forgot password form
+2. Retrieved the reset token from the email client: cderslo94qkhyvmib0y1jvqfbyiyb8pm
+3. Accessed the reset page to verify the token was valid
+4. Intercepted the password reset POST request in Burp Suite Proxy
+5. Sent the request to Burp Repeater for manipulation
+6. Modified the 'username' parameter from 'wiener' to 'carlos'
+7. Set new-password-1 and new-password-2 to a password I control (e.g., "hacked123")
+8. Submitted the modified request
+
+Modified payload:
+POST /forgot-password?temp-forgot-password-token=cderslo94qkhyvmib0y1jvqfbyiyb8pm HTTP/2
+Host: 0a2200a403fc850080cfe4a4007f00b4.web-security-academy.net
+Cookie: session=nhxarhMzk1rzDJv8wGM9exQeAtr1KKUt
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 115
+
+temp-forgot-password-token=cderslo94qkhyvmib0y1jvqfbyiyb8pm&username=carlos&new-password-1=hacked123&new-password-2=hacked123
+
+Result: Password successfully changed for user 'carlos'
+
+9. Logged in as carlos with the new password
+10. Accessed carlos's "My account" page
+11. Lab solved ✓
+
+[EVIDENCE]
+----------
+Vulnerability Type: Broken Authentication - Password Reset Logic Flaw
+Attack Vector: Parameter manipulation
+Affected Endpoint: POST /forgot-password
+Affected Parameter: username (body parameter)
+
+The vulnerability was confirmed by successfully resetting carlos's password using a token that was issued for the wiener account. The server accepted the request without validating token ownership.
+
+Impact: Complete account takeover of any user. An attacker only needs:
+- A valid account to obtain a reset token (or ability to trigger the reset flow)
+- Knowledge of the target username
+- Ability to intercept and modify HTTP requests (Burp Suite, browser dev tools, etc.)
+
+This vulnerability affects ALL user accounts in the application.
+
+[LESSONS LEARNED]
+-----------------
+Technical insights:
+1. Reset tokens must be cryptographically bound to specific user accounts server-side
+2. Never trust client-controlled parameters for security-critical operations
+3. Multi-step processes require state validation at EACH step, not just the initial step
+4. Hidden form fields or body parameters are NOT security controls - they can be easily manipulated
+
+Attack pattern recognition:
+This follows the "parameter tampering" vulnerability class where:
+- The application relies on client-side data for authorization decisions
+- Server-side validation is insufficient or missing
+- Attacker exploits this trust relationship to escalate privileges
+
+Real-world implications:
+In a production environment, this vulnerability would allow:
+- Mass account takeover with minimal effort and resources
+- Privilege escalation to administrative accounts
+- Complete bypass of authentication mechanisms
+- Potential data breaches and compliance violations
+
+Prevention best practices:
+1. Store token-to-user mappings in a database table (e.g., reset_tokens table with columns: token, user_id, created_at, expires_at)
+2. When processing password reset, query: SELECT user_id FROM reset_tokens WHERE token = ? AND expires_at > NOW()
+3. Compare the retrieved user_id with the submitted username - reject if they don't match
+4. Invalidate tokens immediately after successful use (one-time use)
+5. Implement token expiration (15-30 minutes recommended)
+6. Log all password reset attempts for security monitoring
+7. Send email notifications when passwords are changed
+
+Code review focus:
+Always verify that authentication and authorization logic validates ALL security-critical parameters against server-side state, not just client-provided data.

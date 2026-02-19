@@ -1,0 +1,26 @@
+Ma Checklist Pentest Web
+
+## RECON
+- [ ] Toutes les pages visitées
+- [ ] Code source vérifié
+- [ ] Cookies analysés
+
+## INJECTION
+- [ ] SQLi testé (test', test'OR'1'='1)
+- [ ] XSS testé (<script>alert(1)</script>)
+- [ ] Command injection testé (; ls)
+
+## ACCESS CONTROL  
+- [ ] IDOR sur tous les IDs
+- [ ] POST sans auth testé
+- [ ] GET/POST/PUT/DELETE testés
+
+## AUTH
+- [ ] Default creds
+- [ ] Username enumeration
+- [ ] Password reset
+
+## BUSINESS LOGIC
+- [ ] Prix négatifs
+- [ ] Quantité négative
+- [ ] Bypass workflow

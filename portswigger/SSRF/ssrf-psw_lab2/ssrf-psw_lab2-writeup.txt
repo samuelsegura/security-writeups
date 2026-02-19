@@ -1,0 +1,106 @@
+================================
+LAB: Basic SSRF against another back-end system
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: January 27, 2026
+Lab URL: https://0a6a00ef033b6d0e86e2c09c00300084.web-security-academy.net
+Category: Server-Side Request Forgery (SSRF)
+Level: Apprentice
+Objective: Use the stock check functionality to scan the internal 192.168.0.X range for an admin interface on port 8080, then delete the user carlos.
+Description: This lab has a stock check feature which fetches data from an internal system. The vulnerability allows scanning internal network ranges and accessing backend systems not directly reachable from the internet.
+
+[RECONNAISSANCE]
+----------------
+1. Identified the stock check feature on product pages
+2. Intercepted the POST request to /product/stock using Burp Suite
+3. Analyzed the request parameter: stockApi=http://192.168.0.1:8080/product/stock/check?productId=1&storeId=1
+4. Noticed the parameter accepts full URLs, indicating potential SSRF vulnerability
+5. Confirmed the server makes requests to the provided URL and returns responses
+
+Key observation: The stockApi parameter is URL-decoded and processed server-side, allowing arbitrary URL injection.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Vulnerability Type: Server-Side Request Forgery (SSRF)
+Attack Vector: stockApi parameter in POST /product/stock
+
+The application does not validate or restrict the URLs provided in the stockApi parameter. This allows an attacker to:
+- Make requests to internal network addresses (RFC 1918 private ranges)
+- Bypass network-level access controls
+- Access internal services that trust requests from the local network
+
+Testing process:
+1. Modified stockApi to http://192.168.0.1:8080/admin → Server attempted connection
+2. Modified stockApi to http://192.168.0.2:8080/admin → Server attempted connection
+3. Confirmed the server acts as a proxy to internal systems
+
+[EXPLOITATION]
+--------------
+Step 1: Internal Network Scanning
+- Used Burp Intruder to automate scanning of 192.168.0.1-255 on port 8080
+- Payload position: stockApi=http://192.168.0.§1§:8080/admin
+- Payload type: Numbers (1-255)
+- Attack type: Sniper
+
+Step 2: Identifying the Target
+- Analyzed responses by HTTP status code
+- Most IPs returned connection errors or timeouts
+- IP 192.168.0.231 returned HTTP 200 OK
+- Response contained admin interface HTML
+
+Step 3: Accessing Admin Functions
+- Confirmed admin panel at: http://192.168.0.231:8080/admin
+- Identified delete user functionality in the admin interface
+- Constructed deletion URL: http://192.168.0.231:8080/admin/delete?username=carlos
+
+Step 4: Final Exploitation
+- Modified stockApi parameter to: http://192.168.0.231:8080/admin/delete?username=carlos
+- Sent the request
+- Server executed the delete command on the internal admin interface
+- Lab marked as solved
+
+[EVIDENCE]
+----------
+Vulnerable Request:
+POST /product/stock HTTP/2
+Host: 0a6a00ef033b6d0e86e2c09c00300084.web-security-academy.net
+Content-Type: application/x-www-form-urlencoded
+
+stockApi=http://192.168.0.231:8080/admin/delete?username=carlos
+
+Response: HTTP 200 OK (user carlos deleted)
+
+Key Evidence:
+- Status code 200 for 192.168.0.231:8080/admin (vs errors for other IPs)
+- Admin interface accessible without authentication when accessed from internal network
+- Delete function executed successfully via SSRF
+
+[LESSONS LEARNED]
+-----------------
+1. SSRF as Internal Network Proxy
+   - The vulnerable server acts as a pivot point to access internal systems
+   - Network segmentation alone is insufficient if SSRF vulnerabilities exist
+   - Internal services should implement authentication even on private networks
+
+2. Intruder for Network Scanning
+   - Burp Intruder efficiently automated the 255 IP scan
+   - HTTP status codes (200 vs errors) quickly identified live services
+   - Response length can also indicate different content
+
+3. Trust Boundary Exploitation
+   - Internal admin interfaces often trust requests from the internal network
+   - The backend system (192.168.0.231) had no authentication on /admin
+   - Defense in depth principle violated: relying solely on network position
+
+4. Attack Chain
+   - SSRF → Internal network access → Unauthenticated admin panel → Privilege escalation
+   - Multiple security failures required for full exploitation
+
+5. Mitigation Strategies
+   - Whitelist allowed URLs/domains for server-side requests
+   - Implement authentication on all admin interfaces regardless of network location
+   - Use network segmentation AND application-level security
+   - Validate and sanitize all user-controlled URL inputs
+   - Block requests to private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)

