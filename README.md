@@ -1,9 +1,5 @@
 # Security Write-ups / Writeups de sécurité
 
-[🇫🇷 Français](#français) | [🇬🇧 English](#english)
-
----
-
 ## Français
 
 Ces write-ups ont été créés à la base comme support 
