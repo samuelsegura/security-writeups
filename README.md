@@ -1,4 +1,4 @@
-# Security Write-ups / Writeups de sécurité
+# Security-Writeups / Writeups de sécurité
 
 ## Français
 
