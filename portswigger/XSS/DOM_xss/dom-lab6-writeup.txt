@@ -1,0 +1,59 @@
+================================
+LAB: DOM XSS in AngularJS expression with angle brackets and double quotes HTML-encoded
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-26
+Lab URL: https://portswigger.net/web-security/cross-site-scripting/dom-based/lab-angularjs-expression
+Category: Cross-Site Scripting (XSS) - DOM-based
+Level: Apprentice
+Objective: Execute an AngularJS expression via the search functionality to call alert().
+Description: The search functionality reflects user input inside an AngularJS template (ng-app scope).
+Angle brackets and double quotes are HTML-encoded server-side, blocking classic HTML injection.
+However, AngularJS evaluates {{ }} expressions client-side, creating a template injection vector.
+
+[RECONNAISSANCE]
+----------------
+- Searched for a test string, viewed page source.
+- Confirmed <body ng-app=""> — entire page body is an AngularJS template scope.
+- Input is reflected inside the ng-app zone: <h1>0 results for 'USERINPUT'</h1>
+- Verified angle brackets and double quotes are HTML-encoded (< → &lt;, > → &gt;).
+- Injected {{7*7}} → page rendered "49", confirming Angular evaluates expressions from user input.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Input is reflected unsanitized inside an AngularJS template scope (ng-app).
+- {{ }} delimiters are not encoded, enabling Client-Side Template Injection (CSTI).
+- Angular's sandbox blocks direct calls to alert() or window.
+- The sandbox can be escaped via the Function constructor, accessible through Angular's own $on object.
+
+[EXPLOITATION]
+--------------
+Payload injected in the search bar:
+  {{$on.constructor('alert(1)')()}}
+
+Execution chain:
+  $on          → Angular internal function object (accessible inside sandbox)
+  .constructor → native JS Function constructor (outside sandbox restrictions)
+  ('alert(1)') → creates a new Function with alert(1) as body
+  ()           → immediately invokes it
+
+Steps:
+1. Open the lab search page.
+2. Enter {{$on.constructor('alert(1)')()}} in the search field.
+3. Submit the form.
+4. alert(1) fires in the browser.
+
+[EVIDENCE]
+----------
+- alert(1) dialog triggered on page load after payload submission.
+- PortSwigger banner confirmed: "Congratulations, you solved the lab!"
+
+[LESSONS LEARNED]
+-----------------
+- HTML-encoding angle brackets stops tag injection but does NOT stop template injection inside an ng-app scope.
+- Any user input reflected inside an AngularJS ng-app zone is a potential CSTI vector.
+- AngularJS sandbox is not a security boundary — Function constructor bypass has been known since ~2016.
+- Test for template engines (Angular, Vue, Jinja2, etc.) with {{7*7}} as a first canary payload.
+- Modern apps should avoid reflecting user input inside client-side template scopes entirely.

@@ -1,0 +1,62 @@
+================================
+LAB: DOM XSS in jQuery selector sink using a hashchange event
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-26
+Lab URL: https://portswigger.net/web-security/cross-site-scripting/dom-based/lab-jquery-selector-hash-change-event
+Category: Cross-Site Scripting (XSS) > DOM-based
+Level: Apprentice
+Objective: Deliver an exploit to the victim that calls print() in their browser.
+Description: The home page uses jQuery's $() selector to auto-scroll to a blog post
+             whose title is passed via location.hash. The sink is vulnerable to HTML injection.
+
+[RECONNAISSANCE]
+----------------
+- Home page contains a list of blog posts with <h2> titles.
+- Page source reveals a hashchange event listener using jQuery $() selector:
+    $(window).on('hashchange', function(){
+      var post = $('section.blog-list h2:contains(' + decodeURIComponent(location.hash.slice(1)) + ')');
+      if (post) post.get(0).scrollIntoView();
+    });
+- jQuery version is outdated (< 1.9): $() accepts raw HTML strings as input, not just CSS selectors.
+- location.hash is user-controlled, never sanitized, flows directly into the $() sink.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Sink: jQuery $() selector
+- Source: window.location.hash
+- Root cause: Old jQuery versions parse HTML passed to $() and create DOM elements from it,
+  instead of treating it as a CSS selector string.
+- Manual test: Appending #<img src=x onerror=print()> to the URL triggered print() — self-XSS confirmed.
+- Delivery issue: hashchange only fires when the hash *changes*, not on initial page load.
+  Direct link with payload in hash does not trigger the event.
+
+[EXPLOITATION]
+--------------
+- Used the exploit server to host an iframe-based payload.
+- Technique: load the lab with an empty hash, then modify src on onload to inject the payload,
+  forcing a hashchange event after the page is ready.
+
+Payload:
+<iframe src="https://LAB-ID.web-security-academy.net/#" onload="this.src+='<img src=x onerror=print()>'"></iframe>
+
+Steps:
+1. Go to exploit server.
+2. Paste payload in body (replace LAB-ID with actual lab URL).
+3. Store > View exploit to confirm print() triggers.
+4. Deliver exploit to victim.
+
+[EVIDENCE]
+----------
+- print() dialog opened in own browser after "View exploit" — payload executes correctly.
+- Lab marked as solved after "Deliver exploit to victim".
+
+[LESSONS LEARNED]
+-----------------
+- jQuery $() is a dangerous sink: old versions (<1.9) create DOM elements from HTML strings passed as selectors.
+- location.hash is a classic DOM XSS source: never sent to server, often overlooked in code review.
+- hashchange event requires an actual hash *change* — direct URL delivery won't trigger it on load.
+- iframe + onload trick forces a hash change after page load, bypassing the delivery limitation.
+- Always check the jQuery version in scope during recon — version < 1.9 = automatic $() sink suspicion.

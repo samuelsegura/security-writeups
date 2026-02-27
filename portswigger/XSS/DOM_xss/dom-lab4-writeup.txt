@@ -1,0 +1,60 @@
+================================
+LAB: DOM XSS in jQuery anchor href attribute sink using location.search source
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-25
+Lab URL: https://0ac1002903ff213a80650de9005700c5.web-security-academy.net
+Category: DOM-based XSS
+Level: Apprentice
+Objective: Make the "back" link execute alert(document.cookie) via DOM XSS
+Description: The submit feedback page uses jQuery's attr() to set a back link's href
+             from the location.search source without sanitisation.
+
+[RECONNAISSANCE]
+----------------
+- Navigated to /feedback page
+- Observed URL: /feedback?returnPath=<value>
+- Inspected "Back" anchor element in DevTools:
+  <a id="backLink" href="/"> → href dynamically set by JS from returnPath param
+- Source JS identified:
+  $(function() {
+    $('#backLink').attr("href",
+      (new URLSearchParams(window.location.search)).get('returnPath')
+    );
+  });
+- Data flows directly from location.search → jQuery attr() → href attribute, no sanitisation
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+jQuery's attr() sink accepts any value including javascript: URIs.
+No input validation or encoding on the returnPath parameter.
+The href attribute of the "Back" link is fully attacker-controlled via the URL.
+
+[EXPLOITATION]
+--------------
+Crafted URL:
+  /feedback?returnPath=javascript:alert(1)
+
+Steps:
+1. Loaded the feedback page with the above URL
+2. jQuery executed and set href="#backLink" to javascript:alert(1)
+3. Clicked the "Back" link → alert() triggered → lab solved
+
+Real-world payload to prove cookie theft:
+  /feedback?returnPath=javascript:alert(document.cookie)
+
+[EVIDENCE]
+----------
+- DOM after injection: <a id="backLink" href="javascript:alert(1)">Back</a>
+- Alert dialog fired on click, confirming arbitrary JS execution
+- Lab banner confirmed as solved
+
+[LESSONS LEARNED]
+-----------------
+- Third-party libraries (jQuery, etc.) are not XSS-safe by default — attr() is a sink
+- javascript: URIs are valid in href and execute on click, bypassing tag-based filters
+- location.search is an untrusted source; always treat URL params as attacker-controlled
+- Sink validation (allowlist of schemes: http/https only) would block this attack
+- CSP with script-src can mitigate javascript: URI execution if properly configured

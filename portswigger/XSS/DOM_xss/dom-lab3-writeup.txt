@@ -1,0 +1,66 @@
+================================
+LAB: DOM XSS in innerHTML sink using source location.search
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-02-25
+Lab URL: https://portswigger.net/web-security/cross-site-scripting/dom-based/lab-innerhtml-sink
+Category: XSS - DOM-based
+Level: Apprentice
+Objective: Perform a DOM-based XSS attack that calls the alert function.
+Description: The search blog functionality reflects user input into a div via innerHTML assignment without sanitisation, using data from location.search.
+
+[RECONNAISSANCE]
+----------------
+Source code identified in the page:
+
+  function doSearchQuery(query) {
+      document.getElementById('searchMessage').innerHTML = query;
+  }
+  var query = (new URLSearchParams(window.location.search)).get('search');
+  if(query) {
+      doSearchQuery(query);
+  }
+
+- SOURCE: window.location.search -> URLSearchParams.get('search')
+- SINK: document.getElementById('searchMessage').innerHTML
+- No sanitisation between source and sink.
+- Sink target: <span id="searchMessage"> in the DOM.
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+innerHTML directly assigned with user-controlled input from the URL parameter 'search'.
+No encoding, filtering, or sanitisation applied at any point.
+innerHTML parses and renders HTML, including inline event handlers -> arbitrary JS execution possible.
+
+Note: <script> tags injected via innerHTML are NOT executed (HTML5 spec).
+Event handler attributes on HTML elements (e.g. onerror, onload) ARE executed.
+
+[EXPLOITATION]
+--------------
+Payload:
+  <img src=x onerror=alert(1)>
+
+Injection vector:
+  https://<lab-id>.web-security-academy.net/?search=<img src=x onerror=alert(1)>
+
+Steps:
+  1. Open the lab URL.
+  2. Append ?search=<img src=x onerror=alert(1)> to the URL.
+  3. Browser loads the page, innerHTML parses the injected tag.
+  4. img attempts to load src="x" -> resource not found -> onerror triggers.
+  5. alert(1) executes.
+
+[EVIDENCE]
+----------
+Alert dialog displayed in the browser upon page load.
+Lab banner updated to "Congratulations, you solved the lab!"
+
+[LESSONS LEARNED]
+-----------------
+- innerHTML is a dangerous sink: it parses HTML and executes inline event handlers.
+- <script> injected via innerHTML is silently ignored (HTML5 spec protection).
+- onerror/onload on media tags (<img>, <video>, <audio>) bypass this restriction.
+- DOM XSS is entirely client-side: the server never sees the payload.
+- Safe alternative: use textContent or innerText to insert untrusted data (no HTML parsing).
