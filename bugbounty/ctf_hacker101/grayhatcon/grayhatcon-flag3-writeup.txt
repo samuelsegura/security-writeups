@@ -1,0 +1,48 @@
+================================
+LAB: Moderate Grayhatcon CTF — HackerBay (Flag 3)
+================================
+
+[LAB INFORMATION]
+-----------------
+Date: 2026-03-03
+Lab URL: https://f0af3b3e563154e9031f0935fe5ed0bb.ctf.hacker101.com
+Category: Web
+Level: Moderate
+Objective: Delete auction listing #8 owned by user hunter2
+Description: HackerBay auction platform. Exploitation of subuser enable toggle endpoint.
+
+[RECONNAISSANCE]
+----------------
+- /dashboard/subusers allows a parent user to create subusers and enable/disable them via a toggle
+- Enabling a subuser sends: POST /dashboard/subusers  hash=<subuser_hash>&enable_toggle=enable
+- hash parameter identifies the target account — no session ownership check observed
+- test2 account_hash (f4d75b820d417a67e0351cc7d1e13bc2) previously obtained in flag1.
+[VULNERABILITY DISCOVERY]
+-------------------------
+IDOR on /dashboard/subusers enable toggle.
+Server accepts any valid hash in the enable_toggle POST request without verifying
+that the target account belongs to the authenticated user's subuser list.
+
+[EXPLOITATION]
+--------------
+1. Register user "test", login
+2. Create subuser "test3" under "test" via /dashboard/subusers
+3. Trigger enable toggle on test3 — intercept POST request:
+   hash=<test3_hash>&enable_toggle=enable
+4. Replace hash with test2's account_hash:
+   hash=f4d75b820d417a67e0351cc7d1e13bc2&enable_toggle=enable
+5. Server activates test2 and returns dashboard with flag
+
+[EVIDENCE]
+----------
+Response: HTTP/2 200 OK
+Account Status: Unconfirmed (test2 dashboard)
+Flag: ^FLAG^8e12b35ff66e044e2e941c0617bb9540d5ae07d5fc8854103755405205607569$FLAG$
+
+[LESSONS LEARNED]
+-----------------
+- IDOR: always verify the target object belongs to the authenticated session, not just that it exists.
+- Hash-based identifiers are not authorization — validate ownership server-side.
+- Sensitive actions (enable/disable accounts) must check session context, not just parameter validity.
+- Never expose account hashes in unauthenticated endpoints (chained from Flag 1).
+- Test all object references by substituting IDs/hashes from other accounts.
